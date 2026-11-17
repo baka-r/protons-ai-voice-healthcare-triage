@@ -1,0 +1,13 @@
+# Site block to APPEND to an existing Caddy that already owns ports 80/443 (the proxy must be attached to the
+# `protons_edge` network:  docker network connect protons_edge <caddy-container>).
+# Replace the domain if different. Microphone must be allowed for this origin.
+protons.upscaleleads.cloud {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	reverse_proxy hania-web:8080 {
+		flush_interval -1
+	}
+}

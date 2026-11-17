@@ -1,0 +1,21 @@
+# Production overlay (single VPS, TLS terminated by a reverse proxy that is ALREADY running on the host or in another stack).
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#   DOMAIN=hania.example.com is used for the websocket origin check.
+# No host ports are published: the only way in is the proxy attached to the `protons_edge` network.
+# For a host with NO proxy, add docker-compose.caddy.yml (own Caddy on 80/443 with automatic HTTPS).
+services:
+  agent:
+    environment:
+      APP_ENV: prod
+      LOG_FORMAT: json
+      ALLOWED_ORIGINS: "https://${DOMAIN:?set DOMAIN}"
+    ports: !reset []
+
+  hania-web:
+    ports: !reset []
+
+  tts:
+    cpus: 2.0                     # keep the voice engine from starving other workloads on a shared VPS
+
+  backup:
+    profiles: []                  # nightly pg_dump always on in production

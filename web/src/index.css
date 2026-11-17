@@ -1,0 +1,59 @@
+/* Clean, modern, flat: white canvas, ink type, hairline borders. No gradients, glows, blurs or shadows. */
+:root {
+  --accent: #0a0a0a;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --panel: #f5f5f4;
+  --fg: #0a0a0a;
+  --muted: #737373;
+  --line: #e5e5e5;
+  --ok: #16a34a;
+  --bad: #dc2626;
+  --warn: #b45309;
+}
+
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; background: var(--bg); color: var(--fg); }
+
+.ambient { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: var(--bg); }
+.glass { background: var(--surface); border: 1px solid var(--line); }
+
+.label { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; background: #d4d4d4; }
+.dot.ok { background: var(--ok); }
+.dot.on { background: var(--fg); }
+.dot.alert { background: var(--bad); animation: pulse 1.4s ease-in-out infinite; }
+.dot.block, .dot.offline { background: var(--warn); }
+.dot.skip, .dot.idle { background: #d4d4d4; }
+.dot.run { background: var(--fg); animation: pulse 0.9s ease-in-out infinite; }
+
+/* buttons */
+.ctl {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  transition: background-color .15s, border-color .15s, color .15s, transform .12s;
+  font-family: inherit; font-size: 14px; font-weight: 500;
+}
+.ctl:hover { background: var(--panel); }
+.ctl:active { transform: scale(0.96); }
+.ctl:disabled { opacity: 0.35; cursor: not-allowed; }
+.ctl:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+.ctl.round { width: 48px; height: 48px; border-radius: 50%; font-size: 19px; }
+.ctl.big { width: 64px; height: 64px; font-size: 24px; }
+.ctl.pill { height: 48px; padding: 0 26px; border-radius: 24px; }
+.ctl.sm { height: 34px; padding: 0 14px; border-radius: 17px; font-size: 13px; }
+.ctl.primary { background: var(--fg); color: #fff; border-color: var(--fg); }
+.ctl.primary:hover { background: #262626; border-color: #262626; }
+.ctl.danger { color: var(--bad); }
+.ctl.danger:hover { background: #fef2f2; }
+.ctl.muted-on { color: var(--warn); border-color: #fcd9a8; background: #fffbeb; }
+
+.link {
+  background: none; border: 0; padding: 4px 2px; font: inherit; font-size: 13px; font-weight: 500; color: var(--fg); cursor: pointer;
+  text-decoration: underline; text-decoration-color: #d4d4d4; text-underline-offset: 4px; transition: text-decoration-color .15s;
+}
+.link:hover { text-decoration-color: var(--fg); }
+.link:disabled { opacity: .4; cursor: not-allowed; }
+
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .dot.alert, .dot.run { animation: none !important; } }

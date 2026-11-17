@@ -1,0 +1,255 @@
+{
+ "_note": "SYNTHETIC patients. Not real people.",
+ "patients": [
+  {
+   "id": "P-1001",
+   "name": "Ayesha Khan",
+   "birthDate": "1990-03-12"
+  },
+  {
+   "id": "P-1002",
+   "name": "Hamza Ali",
+   "birthDate": "1985-07-21"
+  },
+  {
+   "id": "P-1003",
+   "name": "Fatima Noor",
+   "birthDate": "2001-11-05"
+  },
+  {
+   "id": "P-1004",
+   "name": "Usman Raza",
+   "birthDate": "1978-01-30"
+  },
+  {
+   "id": "P-1005",
+   "name": "Sara Malik",
+   "birthDate": "1995-09-18"
+  },
+  {
+   "id": "P-1101",
+   "name": "Ali Khan",
+   "birthDate": "1992-02-02"
+  },
+  {
+   "id": "P-1102",
+   "name": "Aly Khan",
+   "birthDate": "1992-02-02"
+  },
+  {
+   "id": "P-1103",
+   "name": "Noor Fatima",
+   "birthDate": "1988-08-08"
+  },
+  {
+   "id": "P-1104",
+   "name": "Zara Ahmed-Khan",
+   "birthDate": "1999-12-25"
+  },
+  {
+   "id": "P-1105",
+   "name": "Bibi",
+   "birthDate": "1950-05-05"
+  },
+  {
+   "id": "P-1200",
+   "name": "Kamran Siddiqui",
+   "birthDate": "1945-01-25"
+  },
+  {
+   "id": "P-1201",
+   "name": "Hamza Chaudhry",
+   "birthDate": "1984-06-16"
+  },
+  {
+   "id": "P-1202",
+   "name": "Junaid Sheikh",
+   "birthDate": "1963-11-28"
+  },
+  {
+   "id": "P-1203",
+   "name": "Ayesha Chaudhry",
+   "birthDate": "2005-01-12"
+  },
+  {
+   "id": "P-1204",
+   "name": "Ayesha Butt",
+   "birthDate": "1971-06-24"
+  },
+  {
+   "id": "P-1205",
+   "name": "Hira Butt",
+   "birthDate": "1985-03-07"
+  },
+  {
+   "id": "P-1206",
+   "name": "Adeel Chaudhry",
+   "birthDate": "1949-08-14"
+  },
+  {
+   "id": "P-1207",
+   "name": "Kamran Ali",
+   "birthDate": "1995-03-27"
+  },
+  {
+   "id": "P-1208",
+   "name": "Waqas Qureshi",
+   "birthDate": "2015-03-27"
+  },
+  {
+   "id": "P-1209",
+   "name": "Hassan Mirza",
+   "birthDate": "1981-01-03"
+  },
+  {
+   "id": "P-1210",
+   "name": "Iqra Siddiqui",
+   "birthDate": "2012-11-20"
+  },
+  {
+   "id": "P-1211",
+   "name": "Zoya Malik",
+   "birthDate": "1986-12-09"
+  },
+  {
+   "id": "P-1212",
+   "name": "Danish Raza",
+   "birthDate": "1961-10-09"
+  },
+  {
+   "id": "P-1213",
+   "name": "Junaid Rauf",
+   "birthDate": "2016-03-18"
+  },
+  {
+   "id": "P-1214",
+   "name": "Ahmed Noor",
+   "birthDate": "2013-04-13"
+  },
+  {
+   "id": "P-1215",
+   "name": "Rayan Javed",
+   "birthDate": "2004-01-09"
+  },
+  {
+   "id": "P-1216",
+   "name": "Hassan Noor",
+   "birthDate": "2001-04-28"
+  },
+  {
+   "id": "P-1217",
+   "name": "Usman Ansari",
+   "birthDate": "1941-02-16"
+  },
+  {
+   "id": "P-1218",
+   "name": "Rabia Mirza",
+   "birthDate": "1985-12-23"
+  },
+  {
+   "id": "P-1219",
+   "name": "Sana Raza",
+   "birthDate": "1993-03-01"
+  },
+  {
+   "id": "P-1220",
+   "name": "Waqas Ali",
+   "birthDate": "1997-01-06"
+  },
+  {
+   "id": "P-1221",
+   "name": "Ahmed Sheikh",
+   "birthDate": "1993-09-05"
+  },
+  {
+   "id": "P-1222",
+   "name": "Danish Mirza",
+   "birthDate": "1974-12-27"
+  },
+  {
+   "id": "P-1223",
+   "name": "Talha Sheikh",
+   "birthDate": "1980-12-27"
+  },
+  {
+   "id": "P-1224",
+   "name": "Areeba Khan",
+   "birthDate": "1979-10-22"
+  },
+  {
+   "id": "P-1225",
+   "name": "Kiran Iqbal",
+   "birthDate": "1960-12-12"
+  },
+  {
+   "id": "P-1226",
+   "name": "Ahmed Chaudhry",
+   "birthDate": "1953-03-14"
+  },
+  {
+   "id": "P-1227",
+   "name": "Talha Javed",
+   "birthDate": "2014-11-16"
+  },
+  {
+   "id": "P-1228",
+   "name": "Ayesha Malik",
+   "birthDate": "1982-09-27"
+  },
+  {
+   "id": "P-1229",
+   "name": "Noor Javed",
+   "birthDate": "1970-05-24"
+  },
+  {
+   "id": "P-1230",
+   "name": "Moiz Butt",
+   "birthDate": "1984-05-25"
+  },
+  {
+   "id": "P-1231",
+   "name": "Esha Siddiqui",
+   "birthDate": "2021-11-28"
+  },
+  {
+   "id": "P-1232",
+   "name": "Hamza Raza",
+   "birthDate": "1996-11-08"
+  },
+  {
+   "id": "P-1233",
+   "name": "Kiran Sheikh",
+   "birthDate": "1992-04-19"
+  },
+  {
+   "id": "P-1234",
+   "name": "Amna Chaudhry",
+   "birthDate": "1951-12-13"
+  },
+  {
+   "id": "P-1235",
+   "name": "Dua Javed",
+   "birthDate": "1989-09-08"
+  },
+  {
+   "id": "P-1236",
+   "name": "Shahid Rauf",
+   "birthDate": "1972-09-08"
+  },
+  {
+   "id": "P-1237",
+   "name": "Noor Hussain",
+   "birthDate": "1958-07-28"
+  },
+  {
+   "id": "P-1238",
+   "name": "Waqas Siddiqui",
+   "birthDate": "2015-12-25"
+  },
+  {
+   "id": "P-1239",
+   "name": "Adeel Siddiqui",
+   "birthDate": "1950-06-26"
+  }
+ ]
+}

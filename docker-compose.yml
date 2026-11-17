@@ -1,0 +1,124 @@
+name: protons-triage
+
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  hania-web:
+    <<: *hardening
+    build: ./web
+    ports:
+      - "127.0.0.1:8080:8080"   # localhost only. Put a TLS reverse proxy in front for real deployments (see docs/DEPLOYMENT.md).
+    read_only: true
+    tmpfs: ["/tmp"]
+    depends_on:
+      - agent
+    mem_limit: 256m
+    networks:
+      default: {}
+      edge:
+        aliases: [hania-web]   # the ONLY container on the shared edge network, under a unique name
+
+  agent:
+    <<: *hardening
+    build:
+      context: ./agent
+      args:
+        WITH_LOCAL_STT: "1"      # bundles faster-whisper: offline last-resort speech-to-text
+    env_file: .env             # only the agent receives API keys; the browser never sees them
+    environment:
+      TZ: Asia/Karachi
+    volumes:
+      - agent-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      mock-emr:
+        condition: service_healthy
+      tts:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8000:8000"  # direct API access for debugging (localhost only)
+    mem_limit: 2g
+
+  tts:
+    <<: *hardening
+    cap_drop: []               # the third-party image needs default capabilities
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest   # Kokoro-82M, Apache-2.0 voice model (female: af_heart)
+    mem_limit: 4g
+
+  db:
+    <<: *hardening
+    cap_drop: []
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-triage}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-triage}
+      POSTGRES_DB: ${POSTGRES_DB:-triage}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-triage} -d ${POSTGRES_DB:-triage}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+
+  mock-emr:
+    <<: *hardening
+    build: ./mock-emr
+    read_only: true
+    environment:
+      TZ: Asia/Karachi
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/health', timeout=2).status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Optional: nightly PostgreSQL backups with retention.   docker compose --profile backup up -d backup
+  backup:
+    profiles: ["backup"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-triage}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-triage}
+      PGDATABASE: ${POSTGRES_DB:-triage}
+      KEEP_DAYS: "14"
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - backups:/backups
+    entrypoint: ["sh", "/backup.sh", "loop"]
+
+  # Optional: HTTPS for demoing from a phone on your network (microphones need a secure origin).
+  #   docker compose --profile https up -d
+  https:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    command: caddy reverse-proxy --from :8443 --to hania-web:8080 --internal-certs
+    ports:
+      - "8443:8443"
+    depends_on:
+      - hania-web
+
+networks:
+  # Attach an existing reverse proxy (e.g. Caddy) to this network to publish the site without binding ports 80/443:
+  #   docker network connect protons_edge <proxy-container>      (see docs/DEPLOYMENT.md)
+  edge:
+    name: protons_edge
+
+volumes:
+  agent-data:
+  pg-data:
+  backups:
