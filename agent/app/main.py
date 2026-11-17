@@ -53,8 +53,11 @@ async def lifespan(app: FastAPI):
     from app.services.medsearch import MedSearch
 
     doctor = Doctor(s, llm, MedSearch())
+    from app.services.lang import Localizer
+
+    loc = Localizer(s, llm)
     deps = Deps(settings=s, llm=llm, stt=stt, tts=tts, emr=emr, rag=rag,
-                engine=Engine(s, llm, emr, rag, verify_limiter, doctor), store=store, hub=Hub())
+                engine=Engine(s, llm, emr, rag, verify_limiter, doctor), store=store, hub=Hub(), loc=loc)
 
     async def init_rag() -> None:
         docs = await rag.init(date.today())
@@ -100,6 +103,9 @@ async def lifespan(app: FastAPI):
                 except Exception:
                     await asyncio.sleep(3)
         log.info("tts knowledge cache ready: %d approved sentences", len(set(parts)))
+        # Hindi/Urdu callers: hand-written Hindi lines in the Hindi voice (greeting, emergency, hand-over...)
+        await tts.warm_voice(loc.hindi_fixed_lines(), loc.voice("hi"))
+        log.info("tts hindi cache ready: %d lines", len(loc.hindi_fixed_lines()))
 
     tasks = [
         asyncio.create_task(tts.warm(scripts.all_fixed())),
@@ -347,7 +353,9 @@ async def ws_call(ws: WebSocket):
                 except Exception:
                     continue
                 if kind == "start":
-                    spawn(call.start())
+                    spawn(call.start(str(data.get("lang", "en"))[:2]))
+                elif kind == "set_language":
+                    spawn(call.set_language(str(data.get("lang", "en"))[:2]))
                 elif kind == "text":
                     if not limiter.allow("utt") or call.inflight >= 3:
                         await call.send({"type": "error", "where": "rate", "message": "Please slow down a little."})

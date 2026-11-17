@@ -29,6 +29,7 @@ from app.services.llm import LLM, Analysis
 log = logging.getLogger("engine")
 
 GUIDANCE_COSINE = 0.60  # minimum semantic match between the caller's words and an approved guidance topic
+INFO_SYNTH_COSINE = 0.78  # below this the best passage alone may not answer the question: assemble from several
 INFO_FALLBACK_COSINE = 0.70  # strict bar (calibrated: 0% irrelevant answered, 85% of real info questions) when no intent was recognised
 
 
@@ -260,7 +261,8 @@ class Engine:
                 trace=[{"step": "safety", "status": "alert", "detail": "AI safety net: medical advice request - handing over"}],
                 safety={"scope": "block", "llm_check": "ok"}, intent="medical_question",
             )
-        if a.intent == "talk_to_human":
+        if a.intent == "talk_to_human" and rules.rule_intent(norm) not in self.BENIGN:
+            # (explicit requests for a person are caught by the rules; the AI alone must not turn a hospital-info question into a hand-over)
             return self._handover(
                 s, [_l("human_request")], HandoverRequest("caller_requested", "routine", source="llm"),
                 trace=[{"step": "route", "status": "ok", "detail": "AI safety net: caller wants a person"}], intent="talk_to_human",
@@ -269,14 +271,6 @@ class Engine:
 
     # ------------------------------------------------------------------ routing
     async def _route(self, s: Session, raw: str, norm: str, a: Analysis | None, fast: bool) -> Reply:
-        # language: voice replies are English only for now -> hand over politely
-        if a and a.language in ("ur", "ur-roman") and a.confidence >= 0.6 and not rules.is_yes(norm) and not rules.is_no(norm):
-            s.language = a.language
-            return self._handover(
-                s, [_l("urdu_notice")], HandoverRequest("language", "routine", source="llm"),
-                trace=[{"step": "route", "status": "alert", "detail": "Urdu caller - voice is English only; handing over"}],
-            )
-
         rule_i = rules.rule_intent(norm)
         intent = rule_i or (a.intent if a else None)
         # medical advice / human requests are decided by rules OR the model - either one is enough
@@ -323,7 +317,7 @@ class Engine:
         # a hospital question in the middle of a booking is answered, then the flow resumes
         if intent == "hospital_info" and st != "IDLE":
             query = a.info_query if a and a.info_query else raw
-            return await self._info(s, query, interject=True)
+            return await self._info(s, query, interject=True, allow_synth=a is not None)
         if st in ("AWAIT_NAME", "AWAIT_DOB"):
             if intent == "goodbye":
                 return self._reply(s, [_l("goodbye")], "ENDED", end=True, intent=intent)
@@ -377,7 +371,7 @@ class Engine:
         if intent == "hospital_info":
             s.unclear = 0
             query = (a.info_query if a and a.info_query else raw)
-            return await self._info(s, query)
+            return await self._info(s, query, allow_synth=a is not None)
         if intent == "goodbye":
             return self._reply(s, [_l("goodbye")], "ENDED", end=True, intent=intent)
         if intent == "greeting":
@@ -398,7 +392,7 @@ class Engine:
             hits = await self.rag.search(raw)
             if hits and hits[0].get("cosine", 0.0) >= INFO_FALLBACK_COSINE:
                 s.unclear = 0
-                return await self._info(s, raw)
+                return await self._info(s, raw, allow_synth=a is not None)
         s.unclear += 1
         if s.unclear >= 2:
             return self._handover(
@@ -556,8 +550,8 @@ class Engine:
             lines = [_l({"thanks": "smalltalk"}.get(intent, key)) if intent != "thanks" else Line(text="You're welcome."), Line(text=s.last_prompt)]
         return Reply(lines=lines, state=s.state, intent=intent, trace=[{"step": "respond", "status": "ok", "detail": f"persona: {intent}"}])
 
-    async def _info(self, s: Session, query: str, interject: bool = False) -> Reply:
-        hits = await self.rag.search(query) if self.rag else []
+    async def _info(self, s: Session, query: str, interject: bool = False, allow_synth: bool = True) -> Reply:
+        hits = await self.rag.search(query, k=4) if self.rag else []
         if not hits:
             if interject:
                 return Reply(lines=[_l("no_info"), Line(text=s.last_prompt)], state=s.state, intent="hospital_info",
@@ -566,6 +560,22 @@ class Engine:
                 s, [_l("no_info")], trace=[{"step": "respond", "status": "skip", "detail": "no approved document matched"}], intent="hospital_info",
             )
         top = hits[0]
+        # The best passage is only a so-so match: let the model assemble a short answer from several APPROVED passages
+        # (grounded or nothing; guard-checked; verbatim top passage remains the fallback).
+        if (allow_synth and self.doctor is not None and getattr(self.doctor, "available", False)
+                and top.get("cosine", 1.0) < INFO_SYNTH_COSINE and hasattr(self.doctor, "answer_from_docs")):
+            try:
+                ans = await self.doctor.answer_from_docs(query, hits)
+            except Exception:
+                log.exception("grounded answer failed")
+                ans = None
+            if ans and check_output(ans).ok:
+                used = [{"title": h["title"], "version": h["version"], "chunk_id": h["chunk_id"], "score": h["score"]} for h in hits[:3]]
+                tail = Line(text=s.last_prompt) if interject else _l("anything_else")
+                if not interject:
+                    s.state, s.last_prompt = "IDLE", ans
+                return Reply(lines=[Line(text=ans, trusted=False), tail], state=s.state, intent="hospital_info", sources=used,
+                             trace=[{"step": "respond", "status": "ok", "detail": f"answer assembled from {len(used)} approved passages"}])
         verdict = check_output(top["text"])
         if not verdict.ok:
             return self._handover(

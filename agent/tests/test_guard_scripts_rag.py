@@ -83,3 +83,16 @@ def test_audit_hash_chain_detects_tampering():
 def test_sentence_splitter_joins_tiny_fragments():
     assert split_sentences("Hi. This is a longer second sentence here.") == ["Hi. This is a longer second sentence here."]
     assert len(split_sentences("This is the first full sentence. This is the second full sentence.")) == 2
+
+
+def test_knowledge_metadata_fits_database_columns():
+    """record_knowledge writes these into varchar columns; an overflow silently loses the audit trail (seen in production)."""
+    from pathlib import Path
+
+    for f in Path("knowledge").glob("*.md"):
+        d = parse_markdown(f)
+        vid = f"{d.doc_id}:v{d.version}"
+        assert len(d.doc_id) <= 64 and len(d.title) <= 160 and len(vid) <= 80, f.name
+        assert len((d.approved_by or "")[:80]) <= 80
+        for i, _ in enumerate(d.chunks):
+            assert len(f"{vid}:{i}") <= 120, f.name

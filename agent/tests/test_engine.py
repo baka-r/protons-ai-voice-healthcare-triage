@@ -201,10 +201,6 @@ async def test_symptoms_with_llm_offline_go_to_a_human():
     assert r.handover and r.handover.category == "symptoms_while_ai_offline"
 
 
-async def test_urdu_caller_gets_english_only_handover():
-    eng, _, _ = mk(A(language="ur", intent="book_appointment", confidence=0.9))
-    r, text = await say(eng, Session(id="t"), "مجھے ڈاکٹر سے ملنا ہے")
-    assert r.handover and r.handover.reason == "language"
 
 
 async def test_turn_limit():
@@ -224,3 +220,10 @@ def test_rule_helpers():
     assert str(rules.parse_dob("12 March 1990")) == "1990-03-12"
     assert rules.match_department("i need the heart doctor", DEPTS)["id"] == "cardio"
     assert rules.match_department("ent please", DEPTS)["id"] == "ent"
+
+
+async def test_urdu_hindi_callers_are_served_not_handed_over():
+    eng, _, _ = mk(A(language="ur", intent="book_appointment", confidence=0.9))
+    s = Session(id="t")
+    r, _ = await say(eng, s, "مجھے ڈاکٹر سے ملنا ہے")
+    assert r.handover is None and s.state == "AWAIT_NAME"

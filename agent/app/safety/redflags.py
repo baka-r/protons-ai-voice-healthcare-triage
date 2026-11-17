@@ -67,11 +67,27 @@ _RAW: list[tuple[str, str, str]] = [
     ("infant", "emergency", r"(bacha|bachi|bachay|bache|baby).{0,25}(saans nahi|saans nahin|behosh|neela|neeli|hil nahi)"),
     ("severe_pain", "emergency", r"shadeed dard|bohat (zyada|zyadah) dard|bardasht se bahar|dard bardasht nahi|bohat shadeed"),
     ("pregnancy", "emergency", r"(hamal|pregnant|hamla|hamlah).{0,30}khoon"),
+    # ---------------- Hindi (Devanagari) - normalised text has no nukta
+    ("cardiac", "emergency", r"सीने (में|का|की) (तेज )?(दर्द|जकड़न|दबाव|भारीपन|जलन)|सीने में दर्द|दिल का दौरा|हार्ट अटैक|हार्ट अटैक|दिल (बैठ|रुक|की धड़कन (रुक|तेज))|छाती में (दर्द|जकड़न)"),
+    ("breathing", "emergency", r"सा[ंँ]स (नहीं|न|लेने में|फूल|रुक|बंद|उखड़|नहीं आ)|दम (घुट|नहीं)|गला (बंद|घुट)|सांस की (तकलीफ|दिक्कत)|साँस की (तकलीफ|दिक्कत)"),
+    ("neuro", "emergency", r"बेहोश|होश में नहीं|होश नहीं|दौरा (पड़|पड)|मिर्गी|लकवा|फालिज|चेहरा टेढ़ा|जबान लड़खड़ा|बोल नहीं पा|आंखें पलट|आँखें पलट"),
+    ("bleeding", "emergency", r"खून (बह|बहुत|नहीं रुक|आ रहा|आ रही|की उल्टी|की कै)|(उल्टी|कै|पाखाने|मल) (में )?खून|खून रुक नहीं|खून नहीं रुक"),
+    ("self_harm", "self_harm", r"आत्महत्या|खुदकुशी|खुद ?कुशी|मरना चाहत|मर जाना चाहत|जीना नहीं चाहत|जान दे(ना| दूं| दूँ| दूंगी| दूँगी)|खुद को (नुकसान|मार|चोट|खत्म)|अपनी जान ले"),
+    ("poison", "emergency", r"जहर|विष (पी|खा)|ओवरडोज|ज्यादा गोलियां|ज्यादा गोलियाँ|फिनाइल पी|कीटनाशक"),
+    ("trauma", "emergency", r"एक्सीडेंट|हादसा|दुर्घटना|हड्डी टूट|जल गय|करंट लग|गोली लग|चाकू (लग|मार)|सिर में चोट"),
+    ("generic", "emergency", r"इमरजेंसी|आपातकाल|एम्बुलेंस|एंबुलेंस|जान बचाओ|बचाओ|मदद करो|मर रहा|मर रही|मरने वाला|मरने वाली"),
+    ("infant", "emergency", r"(बच्चा|बच्ची|बच्चे|बेटा|बेटी|शिशु).{0,25}(सा[ंँ]स नहीं|बेहोश|नीला|नीली|हिल नहीं|दौरा|उठ नहीं)"),
+    ("severe_pain", "emergency", r"बहुत (तेज|ज्यादा) दर्द|असहनीय दर्द|दर्द बर्दाश्त नहीं|भयानक दर्द|शदीद दर्द"),
+    ("pregnancy", "emergency", r"(गर्भ|प्रेग्नेंट|गर्भवती|हामिला).{0,30}खून"),
+    ("allergy", "emergency", r"एलर्जी.{0,25}(सा[ंँ]स|सूजन)|गले में सूजन|चेहरे पर सूजन"),
 ]
 
 # "emergency department hours" is an information question, not an emergency.
 _EMERGENCY_INFO = re.compile(
     r"\b(accident and emergency|emergency) (room|department|dept|ward|services?|unit|care|timings?|hours|number|contact|entrance|section|wing)\b|\ber timings?\b"
+    # informational questions about the ambulance SERVICE are not a request for one ("send an ambulance" still escalates)
+    r"|\b(do you have|have you got|is there|are there|got) (an? |any )?ambulances?( service| services| facility| available)?\b(?! (to|for|at|now|here|outside|coming|please))"
+    r"|\bambulances? (service|services|facility|number|charges|cost|fee|fees|timings?|available|availability|contact)\b"
 )
 
 _COMPILED = [(cat, kind, re.compile(pat)) for cat, kind, pat in _RAW]

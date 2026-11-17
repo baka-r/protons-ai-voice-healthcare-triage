@@ -15,10 +15,12 @@ YES_TOKENS = {
     "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "correct", "right", "confirm", "confirmed",
     "absolutely", "definitely", "haan", "han", "ji", "jee", "bilkul", "theek", "thik",
     "جی", "ہاں", "ٹھیک", "بالکل",
+    "हाँ", "हां", "हा", "जी", "जी हाँ", "जी हां", "ठीक", "बिल्कुल", "बिलकुल", "सही", "ज़रूर", "जरूर", "अच्छा", "ओके", "करिए", "कर दीजिए",
 }
 NO_TOKENS = {
     "no", "nope", "nah", "not", "dont", "don't", "never", "wrong", "nahi", "nahin", "nai", "nhi",
     "نہیں", "نہ", "غلط",
+    "नहीं", "नही", "ना", "मत", "गलत", "नहि",
 }
 
 
@@ -40,7 +42,7 @@ def is_yes(norm: str) -> bool:
     return any(p in norm for p in ("go ahead", "that works", "sounds good", "please do", "that's right", "thats right"))
 
 
-_ADDRESS = re.compile(r"\b(hania|haniya|hanya|hannia|hanyah)\b")
+_ADDRESS = re.compile(r"\b(hania|haniya|hanya|hannia|hanyah)\b|हानिया|हनिया|हैनिया")
 _AREHUMAN = re.compile(
     r"\bare you (a |an )?(human|real|robot|bot|ai|machine|person|actual person|computer|alive)\b"
     r"|\bam i (talking|speaking) (to|with) (a |an )?(human|robot|bot|machine|real person|computer|ai)\b|\bis this (a )?(robot|bot|ai|recording)\b"
@@ -79,7 +81,11 @@ _CANCEL = re.compile(r"(cancel|call off|delete|remove).{0,30}(appointment|visit|
 _INFO = re.compile(
     r"\b(opd|visiting|visitors?|pharmacy|lab|laboratory|parking|location|address|where is|where are you|directions|"
     r"how (do i|to) (get|reach)|open|close|closing|timings?|hours|fees?|charges|cost|insurance|bring|prepare|preparation|"
-    r"documents?|departments?|services?|cnic|policy|rules|cafeteria|wifi|facilities|facility|bill|billing|pay|payment|payments)\b"
+    r"documents?|departments?|services?|cnic|policy|rules|cafeteria|wifi|facilities|facility|bill|billing|pay|payment|payments|"
+    r"floor|ambulances?|mri|ct scan|x ?ray|ultrasound|scans?|blood bank|physio\w*|wheelchairs?|prayer|atm|discharge|admission|admitted|"
+    r"reports?|reception|helpline|phone number|email|complaints?|feedback|vaccin\w*|packages?|interpreters?|photos?|lost property|records?|"
+    r"doctors|doctors? (in|for|sees?|available|timings?|schedule|hours)|which doctors?|triage|room types?|sample collection|consultation|follow up|who is the \w+|who are the \w+|cardiologists?|dermatologists?|"
+    r"orthopedic\w*|pediatricians?|gynecologists?|clinic days?|sits?|privacy|receipts?|entrances?)\b"
 )
 _MEDICAL = re.compile(
     r"(what|which) (medicine|medication|drug|tablet|pill|antibiotic|painkiller|syrup|treatment|cure|remedy)s?\b"
@@ -100,12 +106,17 @@ _SYMPTOMS = re.compile(
 )
 
 
+_NOT_SYMPTOM = re.compile(r"\bblood (bank|donation|donor|donors|group|test|tests|report|reports|sample|samples)\b|\bchest (xray|x ray|clinic)\b")
+_ASK_ABOUT = re.compile(r"\b(ask|asking|know|wondering|enquire|inquire|enquiring) (about|regarding)\b|\binformation (on|about|regarding)\b|\btell me about\b|\bdetails (of|about|on)\b|\bwhat are your\b|\bwhat is the\b")
+_BOOK_VERB = re.compile(r"\b(book|schedule|reschedule|cancel|arrange|set up|make an?) ")
+
+
 def mentions_symptoms(norm: str) -> bool:
-    return bool(_SYMPTOMS.search(norm))
+    return bool(_SYMPTOMS.search(_NOT_SYMPTOM.sub(" ", norm)))
 
 
 _LEAD = re.compile(r"^(?:(?:hi|hello|hey|salam|excuse me|um|uh|well|so|ok|okay|please|sorry|listen|quickly)\s+)+")
-_TRAIL = re.compile(r"(?:\s+(?:please|now|today|urgently|immediately|right now|thanks))+$")
+_TRAIL = re.compile(r"(?:\s+(?:please|now|today|urgently|immediately|right now))+$")
 
 
 def _core(norm: str) -> str:
@@ -133,11 +144,62 @@ def is_strict_medical(norm: str) -> bool:
     return bool(_MED_STRICT.search(norm) or _VULNERABLE.search(norm))
 
 
+# ---------------------------------------------------------------- Hindi (Devanagari) intents
+_DEVA = re.compile(r"[ऀ-ॿ]")
+_HI_MEDICAL = re.compile(r"दवा|दवाई|गोली|खुराक|डोज|सिरप|इंजेक्शन|इलाज|नुस्खा|क्या बीमारी|कौन सी बीमारी")
+_HI_AREHUMAN = re.compile(r"(क्या )?आप (इंसान|रोबोट|मशीन|असली|एआई|ai)|यह (रोबोट|रिकॉर्डिंग)|इंसान हैं या")
+_HI_IDENTITY = re.compile(r"आप कौन|तुम कौन|आपका नाम|तुम्हारा नाम|अपने बारे में|आप क्या कर सकती|आप क्या कर सकते|क्या कर सकती हैं|आप क्या करती")
+_HI_HUMAN = re.compile(
+    r"(स्टाफ|इंसान|रिसेप्शन|ऑपरेटर|नर्स|डॉक्टर|कर्मचारी).{0,25}(बात|जोड़|मिला)|(बात|जोड़|मिला).{0,25}(स्टाफ|इंसान|रिसेप्शन|ऑपरेटर|नर्स|डॉक्टर|कर्मचारी)|असली इंसान"
+)
+_HI_RESCHEDULE = re.compile(r"बदल|आगे बढ़ा|टाल|रीशेड्यूल|री शेड्यूल")
+_HI_CANCEL = re.compile(r"रद्द|कैंसल|कैंसिल|निरस्त")
+_HI_BOOK = re.compile(r"अपॉइंटमेंट|अपोइंटमेंट|एपॉइंटमेंट|अप्वाइंटमेंट|डॉक्टर (को )?(दिखाना|से मिलना)|बुकिंग|बुक कर")
+_HI_GOODBYE = re.compile(r"^(अलविदा|बाय|बाय बाय|खुदा हाफिज|अल्लाह हाफिज|बस|बस इतना ही|और कुछ नहीं|कुछ नहीं चाहिए|ठीक है बाय)$")
+_HI_THANKS = re.compile(r"^(धन्यवाद|शुक्रिया|शुक्रिया जी|थैंक्यू|थैंक यू|बहुत धन्यवाद|बहुत शुक्रिया|धन्यवाद जी)$")
+_HI_SMALL = re.compile(r"^(कैसी हो|कैसे हो|आप कैसी हैं|आप कैसे हैं|कैसी हैं आप)$")
+_HI_REPEAT = re.compile(r"दोबारा|फिर से (बोल|बता|कह)|क्या कहा|समझ नहीं आया|एक बार और")
+_HI_GREETING = re.compile(r"^(नमस्ते|नमस्कार|हेलो|हैलो|हाय|सलाम|अस्सलाम ?वालेकुम|आदाब)( जी)?( हानिया)?$")
+_HI_INFO = re.compile(r"ओपीडी|टाइमिंग|समय क्या|कितने बजे|पार्किंग|पता क्या|कहाँ है|कहां है|फार्मेसी|लैब|विज़िटिंग|विजिटिंग|मिलने का समय|फीस|बीमा|वाईफाई|विभाग|सुविधा|कैफेटेरिया")
+
+
+def _hi_intent(norm: str) -> str | None:
+    if _HI_MEDICAL.search(norm):
+        return "medical_question"
+    if _HI_AREHUMAN.search(norm):
+        return "are_you_human"
+    if _HI_IDENTITY.search(norm):
+        return "identity_question"
+    if _HI_HUMAN.search(norm):
+        return "talk_to_human"
+    if _HI_BOOK.search(norm):
+        return "cancel_appointment" if _HI_CANCEL.search(norm) else "reschedule_appointment" if _HI_RESCHEDULE.search(norm) else "book_appointment"
+    if _HI_CANCEL.search(norm) and "अपॉइंट" in norm:
+        return "cancel_appointment"
+    if _HI_GOODBYE.search(norm):
+        return "goodbye"
+    if _HI_THANKS.search(norm):
+        return "thanks"
+    if _HI_SMALL.search(norm):
+        return "smalltalk"
+    if _HI_REPEAT.search(norm):
+        return "repeat_request"
+    if _HI_GREETING.search(norm):
+        return "greeting"
+    if _HI_INFO.search(norm):
+        return "hospital_info"
+    return None
+
+
 def rule_intent(norm: str) -> str | None:
     norm = _ADDRESS.sub(" ", norm)
     norm = re.sub(r"\s+", " ", norm).strip()
     if not norm:
         return None
+    if _DEVA.search(norm):
+        hi = _hi_intent(norm)
+        if hi:
+            return hi
     core = _core(norm)
     if _MEDICAL.search(norm):
         return "medical_question"
@@ -145,6 +207,9 @@ def rule_intent(norm: str) -> str | None:
         return "are_you_human"
     if _IDENTITY.search(norm):
         return "identity_question"
+    # "I wanted to ask about cardiology doctors / consultation fee": an information question, not a request for a person or a booking
+    if _ASK_ABOUT.search(norm) and _INFO.search(norm) and not _BOOK_VERB.search(norm):
+        return "hospital_info"
     if _HUMAN.search(norm):
         return "talk_to_human"
     if _RESCHEDULE.search(norm):
@@ -209,7 +274,7 @@ def parse_dob(text: str) -> date | None:
         return None
     dt = dateparser.parse(
         text,
-        languages=["en"],
+        languages=["en", "hi"],
         settings={"PREFER_DATES_FROM": "past", "DATE_ORDER": "DMY", "STRICT_PARSING": False},
     )
     if not dt:
@@ -226,7 +291,7 @@ def parse_date(text: str) -> date | None:
     base = now_local()
     dt = dateparser.parse(
         text,
-        languages=["en"],
+        languages=["en", "hi"],
         settings={"PREFER_DATES_FROM": "future", "RELATIVE_BASE": base, "DATE_ORDER": "DMY"},
     )
     return dt.date() if dt else None
@@ -241,7 +306,7 @@ def parse_time(text: str) -> str | None:
     """Return 'HH:MM' if the text clearly states a clock time."""
     if not re.search(r"\d|noon|midnight", text):
         return None
-    dt = dateparser.parse(text, languages=["en"], settings={"PREFER_DATES_FROM": "future"})
+    dt = dateparser.parse(text, languages=["en", "hi"], settings={"PREFER_DATES_FROM": "future"})
     if not dt:
         return None
     return dt.strftime("%H:%M")
@@ -312,3 +377,20 @@ def join_list(items: list[str]) -> str:
     if len(items) <= 1:
         return "".join(items)
     return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+# ---------------------------------------------------------------- caller does NOT want the staff hand-over
+_CANCEL_HANDOVER = re.compile(
+    r"(don'?t|do not|dont|no need|not necessary|no longer|stop|cancel|never ?mind|forget|without).{0,30}(call|connect|transfer|staff|person|human|nurse|doctor|support|team|anyone|anybody|them|help)"
+    r"|(call|connect|transfer|staff|support).{0,20}(off|cancel|not needed|not required|nahi chahiye)"
+    r"|\bi('?m| am) (fine|okay|ok|alright|safe|good|better)\b|\bfalse alarm\b|\bnot an emergency\b|\bit'?s nothing\b|\bno emergency\b|\bjust (kidding|joking)\b"
+    r"|\bi (don'?t|do not) (want|need) (staff|anyone|anybody|a person|a human|to (talk|speak|be connected))"
+    r"|(staff|support|kisi se|insaan).{0,15}(nahi|nahin|mat)|\bmat (jodo|milao|bulao|karo)\b|\bzaroorat nahi\b|\bkoi zaroorat nahi\b|\bwapas (baat|aao)\b|\brehne do\b"
+    r"|(स्टाफ|इंसान|किसी|सपोर्ट).{0,25}(नहीं चाहिए|मत|ज़रूरत नहीं|जरूरत नहीं|नहीं करनी|नहीं करना)|कॉल मत|जोड़ो मत|जोड़ना मत|रहने दो|रहने दीजिए|कोई जरूरत नहीं|कोई ज़रूरत नहीं|मैं ठीक हूं|मैं ठीक हूँ|सब ठीक है"
+    r"|(اسٹاف|کسی سے).{0,20}(نہیں|مت)|ضرورت نہیں|رہنے دو|میں ٹھیک ہوں"
+    r"|^(no|nope|no thanks|no thank you|nahi|nahin|नहीं|नही|نہیں)( thanks| thank you)?$"
+)
+
+
+def wants_cancel_handover(norm: str) -> bool:
+    return bool(_CANCEL_HANDOVER.search(norm))

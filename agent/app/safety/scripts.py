@@ -61,6 +61,11 @@ _RAW: dict[str, str] = {
         "If it feels severe or is getting worse, please call {emergency}."
     ),
     "symptom_retry": "Sorry, I need a yes or a no for that one.",
+    "handover_cancelled": "Okay, no problem. I won't connect you to staff. I'm still here with you. What would you like to talk about?",
+    "handover_keep_alert": (
+        "I understand, and I'm still here with you. Because of what you told me, I'll keep our team alerted just in case. "
+        "Please tell me how you're feeling, and if you're in danger, call {emergency}."
+    ),
     "human_request": "Of course. I'm connecting you to a member of our staff now.",
     "handover_wait": "Please stay on the line. A staff member will be with you shortly.",
     "still_waiting": (

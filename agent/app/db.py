@@ -139,7 +139,7 @@ class DocumentVersion(Base):
     document_id: Mapped[str] = mapped_column(ForeignKey("knowledge_document.document_id"))
     version: Mapped[int] = mapped_column(Integer)
     approval_status: Mapped[str] = mapped_column(String(20))
-    approved_by: Mapped[str] = mapped_column(String(80), default="")
+    approved_by: Mapped[str] = mapped_column(String(200), default="")
     expires: Mapped[str | None] = mapped_column(String(16), nullable=True)
     included: Mapped[bool] = mapped_column(Boolean, default=False)
     exclusion_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -355,7 +355,7 @@ class Store:
                     existing.approval_status, existing.included, existing.exclusion_reason = d.approval_status, d.included, d.exclusion_reason
                 else:
                     db.add(DocumentVersion(version_id=vid, document_id=d.doc_id, version=d.version, approval_status=d.approval_status,
-                                           approved_by=d.approved_by, expires=d.expires, included=d.included, exclusion_reason=d.exclusion_reason))
+                                           approved_by=(d.approved_by or "")[:80], expires=d.expires, included=d.included, exclusion_reason=d.exclusion_reason))
                     db.flush()
                     for i, (heading, text) in enumerate(d.chunks):
                         db.add(DocumentChunk(chunk_id=f"{vid}:{i}", version_id=vid, idx=i, text=text, embedding_id=f"{vid}:{i}" if d.included else None))

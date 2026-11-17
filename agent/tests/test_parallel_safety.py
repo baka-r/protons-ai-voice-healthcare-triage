@@ -86,3 +86,16 @@ async def test_short_slot_answers_skip_the_llm_entirely():
     t0 = asyncio.get_running_loop().time()
     r = await eng.handle(s, "cardiology please")
     assert asyncio.get_running_loop().time() - t0 < 0.5 and s.state == "AWAIT_DATE" and r.pending_analysis is None
+
+
+async def test_ai_alone_cannot_turn_an_info_question_into_a_handover():
+    eng, s = mk(SlowLLM(A(intent="talk_to_human"))), Session(id="t")
+    r = await eng.handle(s, "what are your OPD timings")
+    assert eng.late_action(s, await r.pending_analysis, "what are your OPD timings") is None
+
+
+async def test_ai_can_still_flag_emergency_on_an_info_style_message():
+    eng, s = mk(SlowLLM(A(intent="other", red_flag=True))), Session(id="t")
+    r = await eng.handle(s, "what are the visiting hours")
+    late = eng.late_action(s, await r.pending_analysis, "what are the visiting hours")
+    assert late and late.handover.urgency == "emergency"

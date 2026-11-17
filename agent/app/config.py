@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     tts_url: str = "http://tts:8880"
     tts_voice: str = "af_heart"
     tts_speed: float = 1.05
+    tts_voice_hi: str = "hf_alpha"  # female Hindi voice, used for Hindi AND Urdu callers
+    assistant_name_local: str = "हानिया"
+    hospital_name_local: str = "प्रोटॉन्स डेमो हॉस्पिटल"
 
     hospital_name: str = "Protons Demo Hospital"
     assistant_name: str = "Hania"

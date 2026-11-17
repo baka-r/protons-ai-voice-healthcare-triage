@@ -35,6 +35,28 @@ class STTResult:
     route: str | None = None
 
 
+_LANG_NAMES = {"english": "en", "hindi": "hi", "urdu": "ur", "punjabi": "pa", "arabic": "ar", "bengali": "bn"}
+
+
+def norm_lang(v: str | None) -> str | None:
+    """Whisper (Groq) reports 'Hindi'/'Urdu'; local/OpenAI report 'hi'/'ur'. Always return the short code."""
+    if not v:
+        return None
+    v = v.strip().lower()
+    return _LANG_NAMES.get(v, v[:2])
+
+
+def script_of(text: str) -> str | None:
+    """'deva' (Hindi), 'arab' (Urdu) or None, from the characters actually transcribed."""
+    deva = sum(1 for c in text if "ऀ" <= c <= "ॿ")
+    arab = sum(1 for c in text if "؀" <= c <= "ۿ")
+    if deva >= 3 and deva >= arab:
+        return "deva"
+    if arab >= 3:
+        return "arab"
+    return None
+
+
 def pcm_to_wav(pcm: bytes, sr: int = SAMPLE_RATE) -> bytes:
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
@@ -90,7 +112,7 @@ class STT:
         return snapshot(self.routes)
 
     # ------------------------------------------------------------------ main
-    async def transcribe(self, pcm: bytes) -> STTResult:
+    async def transcribe(self, pcm: bytes, language: str | None = None) -> STTResult:
         t0 = time.perf_counter()
         samples = np.frombuffer(pcm, dtype=np.int16)
         dur = len(samples) / SAMPLE_RATE
@@ -105,9 +127,9 @@ class STT:
         for r in [x for x in rotate_groups(self.routes, self._rr) if x.available()]:
             try:
                 if r.provider == "local":
-                    text, lang, no_speech = await self._local_transcribe(r, samples)
+                    text, lang, no_speech = await self._local_transcribe(r, samples, language)
                 else:
-                    text, lang, no_speech = await self._http_transcribe(r, wav)
+                    text, lang, no_speech = await self._http_transcribe(r, wav, language)
             except asyncio.CancelledError:
                 raise
             except _RouteError as e:
@@ -131,21 +153,23 @@ class STT:
         return STTResult("", None, int((time.perf_counter() - t0) * 1000), ignored="error")
 
     # ------------------------------------------------------------------ providers
-    async def _http_transcribe(self, r: Route, wav: bytes) -> tuple[str, str | None, bool]:
+    async def _http_transcribe(self, r: Route, wav: bytes, language: str | None = None) -> tuple[str, str | None, bool]:
         if r.provider == "groq":
             url, data = "https://api.groq.com/openai/v1/audio/transcriptions", {"model": r.model, "response_format": "verbose_json", "temperature": "0"}
         else:
             url, data = "https://api.openai.com/v1/audio/transcriptions", {"model": r.model}
+        if language and r.model != "gpt-transcribe":  # gpt-transcribe takes `languages`, older models take `language`
+            data["language"] = language
         resp = await self.http.post(url, headers={"Authorization": f"Bearer {r.key}"}, files={"file": ("speech.wav", wav, "audio/wav")}, data=data)
         if resp.status_code != 200:
             # OpenAI: retry once with the older model if the new one is unavailable on this account
             if r.provider == "openai" and resp.status_code in (400, 404) and r.model != self.s.stt_fallback_model:
                 r.model = self.s.stt_fallback_model
-                return await self._http_transcribe(r, wav)
+                return await self._http_transcribe(r, wav, language)
             kind, cd = classify_status(resp.status_code, resp.headers)
             raise _RouteError(kind, cd)
         j = resp.json()
-        lang = j.get("language") or (j.get("languages") or [None])[0]
+        lang = norm_lang(j.get("language") or (j.get("languages") or [None])[0])
         segs = j.get("segments") or []
         no_speech = bool(segs) and all(float(s.get("no_speech_prob", 0)) > 0.8 and float(s.get("avg_logprob", 0)) < -1.0 for s in segs)
         return j.get("text", ""), lang, no_speech
@@ -179,11 +203,11 @@ class STT:
             await asyncio.to_thread(self._load_local, local.model)
         log.info("stt routes: %s", [f"{x['route']}={x['state']}" for x in self.status()])
 
-    async def _local_transcribe(self, r: Route, samples: np.ndarray) -> tuple[str, str | None, bool]:
+    async def _local_transcribe(self, r: Route, samples: np.ndarray, language: str | None = None) -> tuple[str, str | None, bool]:
         def run() -> tuple[str, str | None, bool]:
             model = self._load_local(r.model)
             audio = samples.astype(np.float32) / 32768.0
-            segs, info = model.transcribe(audio, beam_size=1, vad_filter=False, condition_on_previous_text=False, temperature=0.0)
+            segs, info = model.transcribe(audio, beam_size=1, vad_filter=False, condition_on_previous_text=False, temperature=0.0, language=language)
             segs = list(segs)
             no_speech = bool(segs) and all(s.no_speech_prob > 0.8 and s.avg_logprob < -1.0 for s in segs)
             return " ".join(x.text for x in segs), info.language, no_speech

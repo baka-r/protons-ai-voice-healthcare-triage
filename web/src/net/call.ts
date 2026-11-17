@@ -53,7 +53,7 @@ export class CallClient {
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "start" }));
+      ws.send(JSON.stringify({ type: "start", lang: useStore.getState().lang }));
       useStore.getState().set({ phase: "live" });
       void this.startMic();
     };
@@ -138,6 +138,12 @@ export class CallClient {
     this.send({ type: "text", text: t });
   }
 
+  setLanguage(lang: "en" | "hi" | "ur") {
+    useStore.getState().set({ lang });
+    try { localStorage.setItem("hania_lang", lang); } catch { /* storage unavailable */ }
+    this.send({ type: "set_language", lang });
+  }
+
   requestHuman() {
     this.player?.stop();
     this.send({ type: "request_human" });
@@ -200,7 +206,12 @@ export class CallClient {
       case "timing":
         st.set({ timing: { ...st.timing, ...m } });
         break;
+      case "language":
+        st.set({ lang: m.lang });
+        try { localStorage.setItem("hania_lang", m.lang); } catch { /* storage unavailable */ }
+        break;
       case "handover":
+        if (m.status === "cancelled") { st.set({ handover: null }); break; }
         st.set({ handover: { status: m.status, id: m.id, staff: m.staff, urgency: m.urgency, reason: m.reason } });
         if (m.status === "waiting") sfx.alert();
         if (m.status === "connected") sfx.connect();

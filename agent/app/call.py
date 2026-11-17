@@ -24,8 +24,11 @@ from app.services.emr import EMR
 from app.services.llm import LLM
 from app.services.rag import RAG
 from app.metrics import metrics
-from app.services.stt import STT, STTResult
-from app.services.tts import SAMPLE_RATE, TTS, split_sentences
+from app.services.lang import Localizer
+from app.services.stt import STT, STTResult, script_of
+from app.safety.text import normalize
+from app.dialog import rules
+from app.services.tts import PAUSE_LINE_MS, SAMPLE_RATE, TTS, pause_ms, silence, split_sentences
 
 log = logging.getLogger("call")
 
@@ -41,6 +44,7 @@ class Deps:
     engine: Engine
     store: Store
     hub: Hub
+    loc: Localizer
 
 
 class CallSession:
@@ -49,6 +53,8 @@ class CallSession:
         self.d = deps
         self.s = Session(id=uuid.uuid4().hex[:12], client_ip=ip)
         self.inflight = 0
+        self.turn_task: asyncio.Task | None = None
+        self.skip_wait_line = False
         self._last_text = ""
         self.turn_lock = asyncio.Lock()
         self.speak_lock = asyncio.Lock()
@@ -106,8 +112,11 @@ class CallSession:
         self.s.history.append({"role": role, "text": text, "ts": time.time()})
 
     # ------------------------------------------------------------------ lifecycle
-    async def start(self) -> None:
+    async def start(self, lang: str = "en") -> None:
         d, s = self.d, self.s
+        if lang in ("hi", "ur"):
+            s.language = lang
+            await self.send({"type": "language", "lang": lang})
         d.hub.calls[s.id] = self
         d.store.fire(d.store.create_session, s.id)
         d.store.fire(d.store.audit, "system", "call_started", {"session": s.id})
@@ -158,29 +167,51 @@ class CallSession:
             if not task.cancelled() and task.exception():
                 log.error("speak failed: %r", task.exception())
 
+    async def _localize(self, line: Line, text: str) -> tuple[str, str | None]:
+        """(text to show and speak, voice). English stays as is; Hindi/Urdu callers get the translated line in a Hindi voice."""
+        if self.s.language == "en":
+            return text, None
+        loc = self.d.loc
+        out = await loc.text(text, self.s.language, line.key if text == line.text else None)
+        if out is None:  # translation unavailable: speak English rather than nothing
+            return text, None
+        return out, loc.voice(self.s.language)
+
     async def _speak_inner(self, lines: list[Line], timing: dict | None) -> None:
         await self.state("speaking")
         started = False
+        loop = asyncio.get_running_loop()
+        # 1) safety guard on the ENGLISH text, always. 2) translate (concurrently) for Hindi/Urdu callers.
+        texts: list[str] = []
+        for line in lines:
+            text = line.text
+            if not line.trusted:
+                verdict = check_output(text)
+                if not verdict.ok:
+                    self.d.store.fire(self.d.store.audit, "system", "output_guard_block", {"session": self.s.id, "reason": verdict.reason})
+                    text = scripts.fixed("degraded")
+            texts.append(text)
+        loc_tasks = [loop.create_task(self._localize(line, t)) for line, t in zip(lines, texts)]
         try:
-            for line in lines:
-                text = line.text
-                if not line.trusted:
-                    verdict = check_output(text)
-                    if not verdict.ok:
-                        self.d.store.fire(self.d.store.audit, "system", "output_guard_block", {"session": self.s.id, "reason": verdict.reason})
-                        text = scripts.fixed("degraded")
+            for line, english, task in zip(lines, texts, loc_tasks):
+                text, voice = await task
                 await self.send({"type": "caption", "role": "assistant", "text": text})
                 if not started:
                     await self.send({"type": "audio_start", "sample_rate": SAMPLE_RATE})
                     started = True
+                else:
+                    await self.send_bytes(silence(PAUSE_LINE_MS))  # breath between separate lines
                 try:
-                    await self._send_audio(text, timing, line.chunks if text == line.text else None)
+                    await self._send_audio(text, timing, line.chunks if (voice is None and english == line.text) else None, voice)
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
                     log.warning("tts failed (%s) - caption only", type(e).__name__)
                     await self.send({"type": "error", "where": "tts", "message": "Voice unavailable - showing text only"})
         finally:
+            for t in loc_tasks:
+                if not t.done():
+                    t.cancel()
             if started:
                 await self.send({"type": "audio_end"})
 
@@ -201,13 +232,13 @@ class CallSession:
             await self.send_bytes(pcm[j:j + 16384])
             await asyncio.sleep(0)
 
-    async def _send_audio(self, text: str, timing: dict | None, chunks: list[str] | None = None) -> None:
+    async def _send_audio(self, text: str, timing: dict | None, chunks: list[str] | None = None, voice: str | None = None) -> None:
         """Whole line cached -> play at once. Otherwise speak it chunk by chunk: cached chunks play instantly, the first
         uncached one streams as it is synthesised, and the rest are synthesised in the background (2 at a time)."""
         tts = self.d.tts
         if timing is not None:
             timing["tts_t0"] = time.perf_counter()
-        pcm = tts.cached(text)
+        pcm = tts.cached(text, voice)
         if pcm is not None:
             await self._send_pcm(pcm, timing)
             return
@@ -215,23 +246,32 @@ class CallSession:
         tasks: dict[int, asyncio.Task] = {}
         loop = asyncio.get_running_loop()
 
+        async def pause_before(i: int) -> None:
+            """Natural, deliberate gap between pieces (the pieces themselves are silence-trimmed)."""
+            if i > 0:
+                await self.send_bytes(silence(pause_ms(parts[i - 1])))
+
         def prepare_next(i: int) -> None:  # synthesise the next uncached chunks while earlier audio is still playing
             for k in range(i + 1, min(i + 3, len(parts))):
-                if k not in tasks and tts.cached(parts[k]) is None:
-                    tasks[k] = loop.create_task(tts.render(parts[k]))
+                if k not in tasks and tts.cached(parts[k], voice) is None:
+                    tasks[k] = loop.create_task(tts.render(parts[k], voice=voice))
 
         try:
             for i, part in enumerate(parts):
-                hit = tts.cached(part)
+                hit = tts.cached(part, voice)
                 if hit is not None:
                     prepare_next(i)  # playback of cached audio gives the engine time to prepare what follows
+                    await pause_before(i)
                     await self._send_pcm(hit, timing)
                 elif i in tasks:
                     prepare_next(i)
-                    await self._send_pcm(await tasks[i], timing)
+                    data = await tasks[i]
+                    await pause_before(i)
+                    await self._send_pcm(data, timing)
                 else:  # uncached: stream it as it is produced; start the next ones only once audio is flowing
+                    await pause_before(i)
                     prepared = False
-                    async for chunk in tts.stream_shared(part):
+                    async for chunk in tts.stream_shared(part, voice):
                         await self._first_audio(timing)
                         if not prepared:
                             prepare_next(i)
@@ -256,6 +296,24 @@ class CallSession:
     async def handle_input(self, pcm: bytes | None = None, text: str | None = None) -> None:
         if self.s.ended or self.mode == "connected":
             return
+        me = asyncio.current_task()
+        # A new message SUPERSEDES whatever Hania is still doing (thinking or speaking): never finish the old answer first.
+        # Emergency / hand-over speech is protected and never cut off.
+        if self.mode == "normal" and not self.protect_speech:
+            prev = self.turn_task
+            if prev is not None and prev is not me and not prev.done():
+                prev.cancel()
+                metrics.inc("turns_superseded")
+            if self.speak_task and not self.speak_task.done():
+                self.speak_task.cancel()
+            await self.send({"type": "audio_end", "interrupted": True})
+        elif self.mode == "handover" and not self.protect_speech:
+            # speaking over the "connecting you to staff" lines: stop them at once (the hand-over itself is NOT cancelled by this)
+            self.skip_wait_line = True
+            if self.speak_task and not self.speak_task.done():
+                self.speak_task.cancel()
+            await self.send({"type": "audio_end", "interrupted": True})
+        self.turn_task = me
         self.inflight += 1
         try:
             async with self.turn_lock:
@@ -298,7 +356,7 @@ class CallSession:
                 await self.trace("listen", "ok", f"{len(pcm) / 32000:.1f}s of speech")
                 await self.trace("transcribe", "run", "speech to text")
                 try:
-                    r = await asyncio.wait_for(d.stt.transcribe(pcm), 14)
+                    r = await asyncio.wait_for(d.stt.transcribe(pcm, self._stt_hint()), 14)
                 except asyncio.TimeoutError:
                     r = STTResult("", None, 14000, ignored="error")
                 timing["stt_ms"] = r.ms
@@ -321,6 +379,7 @@ class CallSession:
                     await self._finish_turn(reply, timing, filler_task, filler_started)
                     return
             text = (text or "").strip()
+            await self._maybe_switch_language(text)
             state_before = s.state
             identity = state_before in ("AWAIT_NAME", "AWAIT_DOB")
             self._last_text = text
@@ -360,15 +419,78 @@ class CallSession:
                     pass
         await self._deliver(reply, timing)
 
+    # ------------------------------------------------------------------ language
+    def _stt_hint(self) -> str | None:
+        """English sessions auto-detect (so Hindi/Urdu is noticed); Hindi/Urdu sessions hint their language, except for names."""
+        lang = self.s.language
+        if lang == "en":
+            return None
+        return "en" if self.s.state == "AWAIT_NAME" else lang
+
+    async def set_language(self, lang: str) -> None:
+        if lang not in ("en", "hi", "ur") or lang == self.s.language:
+            return
+        self.s.language = lang
+        await self.send({"type": "language", "lang": lang})
+        await self.trace("understand", "ok", f"language set to {lang}")
+        if lang != "en" and self.d.tts is not None:  # make sure the Hindi greeting-style lines are ready
+            self._spawn(self.d.tts.warm_voice(self.d.loc.hindi_fixed_lines(), self.d.loc.voice(lang)))
+
+    async def _maybe_switch_language(self, text: str) -> None:
+        """Heard (or typed) Hindi/Urdu while the session is English -> switch automatically, and tell the UI."""
+        if self.s.language != "en" or not text:
+            return
+        sc = script_of(text)
+        if sc == "deva":
+            await self.set_language("hi")
+        elif sc == "arab":
+            await self.set_language("ur")
+
+    # ------------------------------------------------------------------ cancelling a hand-over
+    async def _cancel_handover(self) -> None:
+        """Caller says they do NOT want staff: switch back to the assistant and carry on talking.
+        A routine/urgent hand-over is withdrawn. An EMERGENCY alert stays active for safety (never silently cancelled),
+        but Hania keeps talking with the caller."""
+        s, d = self.s, self.d
+        h = d.hub.handovers.get(s.handover_id or "")
+        keep = bool(h and h["urgency"] == "emergency")
+        if self.hold_task:
+            self.hold_task.cancel()
+        self.mode = "normal"
+        self.protect_speech = False
+        s.state = "IDLE"
+        s.unclear = 0
+        if keep:
+            key = "handover_keep_alert"
+            d.store.fire(d.store.audit, "caller", "handover_cancel_refused_emergency", {"session": s.id, "handover": s.handover_id})
+        else:
+            key = "handover_cancelled"
+            if h and h["status"] == "waiting":
+                h["status"] = "cancelled"
+                d.store.fire(d.store.update_escalation, h["id"], status="cancelled")
+                await d.hub.broadcast_staff({"type": "handover_updated", "handover": d.hub.public(h)})
+            d.store.fire(d.store.audit, "caller", "handover_cancelled", {"session": s.id, "handover": s.handover_id})
+            s.handover_id = None
+            await self.send({"type": "handover", "status": "cancelled"})
+            metrics.inc("handovers_cancelled")
+        await self._speak([Line(text=scripts.fixed(key), key=key)])
+        self._remember("assistant", scripts.fixed(key))
+        await self.state("listening")
+
     async def _turn_during_handover(self, pcm: bytes | None, text: str | None) -> None:
-        """While waiting for staff the assistant stays silent but keeps a transcript for them."""
+        """While waiting for staff the assistant stays quiet but keeps a transcript for them - unless the caller
+        says they don't want staff, in which case she switches back and carries on."""
         if pcm is not None:
-            r = await self.d.stt.transcribe(pcm)
+            r = await self.d.stt.transcribe(pcm, self._stt_hint())
             text = r.text
         text = (text or "").strip()
         if not text:
             return
         await self.send({"type": "caption", "role": "caller", "text": text})
+        if rules.wants_cancel_handover(normalize(text)):
+            self._remember("caller", self._mask(text))
+            await self._cancel_handover()
+            return
         self._remember("caller", self._mask(text))
         h = self.d.hub.handovers.get(self.s.handover_id or "")
         if h:
@@ -411,13 +533,16 @@ class CallSession:
         if reply.handover:
             await self._begin_handover(reply.handover)
             self.protect_speech = reply.handover.urgency == "emergency"
+        self.skip_wait_line = False
         try:
             await self._speak(reply.lines, timing)
-            if reply.handover:
+            if reply.handover and not self.skip_wait_line:
                 await self._speak([Line(text=scripts.fixed("handover_wait"), key="handover_wait")])
         finally:
             self.protect_speech = False
-        if reply.handover:
+        if reply.handover and self.mode == "normal":
+            pass  # the caller already cancelled it while the line was playing
+        elif reply.handover:
             self.hold_task = asyncio.get_running_loop().create_task(self._hold(reply.handover.urgency))
             await self.state("handover")
         elif reply.end:
@@ -453,6 +578,11 @@ class CallSession:
     async def _begin_handover(self, req: HandoverRequest) -> None:
         s, d = self.s, self.d
         if s.handover_id:
+            # an alert is already open (e.g. an emergency the caller asked not to cancel): re-enter hand-over mode, no duplicate
+            h0 = d.hub.handovers.get(s.handover_id)
+            if h0 and h0["status"] == "waiting":
+                self.mode = "emergency" if h0["urgency"] == "emergency" else "handover"
+                await self.send({"type": "handover", "status": "waiting", "id": h0["id"], "reason": h0["reason"], "urgency": h0["urgency"]})
             return
         self.mode = "emergency" if req.urgency == "emergency" else "handover"
         metrics.inc("handovers_total", reason=req.reason, urgency=req.urgency)
@@ -499,7 +629,7 @@ class CallSession:
         self._spawn(self._speak([Line(text=scripts.fixed("connected"), key="connected")]))
 
     async def request_human(self) -> None:
-        if self.s.handover_id or self.s.ended:
+        if self.s.ended or self.mode in ("handover", "emergency", "connected"):
             return
         async with self.turn_lock:
             reply = Reply(

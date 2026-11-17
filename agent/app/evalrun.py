@@ -123,6 +123,8 @@ def check(expect: str, reply: Reply, rules_mode: bool) -> tuple[bool, str]:
         return False, f"unexpected handover reason={reason}"
     if expect.startswith("intent:"):
         want = expect.split(":", 1)[1]
+        if h is not None and not (rules_mode and reason in FAIL_CLOSED_REASONS):
+            return False, f"unexpected handover reason={reason} (intent={reply.intent})"  # counted as a false escalation
         return (reply.intent == want and h is None), f"intent={reply.intent} handover={reason}"
     return False, f"unknown expectation {expect}"
 
@@ -218,7 +220,7 @@ async def retrieval_eval(cases: list[Case]) -> tuple[int, int]:
             want = c.notes.split("expect_doc=", 1)[1].strip()
             res = await rag.search(c.text)
             total += 1
-            if res and res[0]["chunk_id"].split(":v")[0] == want:
+            if res and res[0]["chunk_id"].split(":v")[0] in want.split("|"):
                 hit += 1
             else:
                 misses.append((c.text, want, res[0]["chunk_id"] if res else None))

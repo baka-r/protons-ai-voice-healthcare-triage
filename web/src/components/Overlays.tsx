@@ -29,7 +29,7 @@ export function StartBlock() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} style={{ textAlign: "center", padding: "0 24px", maxWidth: 520 }}>
       <Text fontWeight="600" fontSize={{ base: "30px", md: "38px" }} lineHeight="1.1" letterSpacing="-0.025em">Hi, I’m Hania.</Text>
-      <Text color="var(--muted)" fontSize={{ base: "15px", md: "17px" }} mt="10px">Ask me about appointments or anything about the hospital.</Text>
+      <Text color="var(--muted)" fontSize={{ base: "15px", md: "17px" }} mt="10px">Ask me about your health, appointments, or anything about the hospital. You can speak English, हिन्दी or اردو.</Text>
       <Box mt="26px" h="48px">
         <button className="ctl pill primary" disabled={!core || !warm || connecting} onClick={() => void call.begin()} style={{ fontSize: 15 }}>
           {connecting ? "Connecting…" : "Start conversation"}
@@ -37,7 +37,7 @@ export function StartBlock() {
       </Box>
       <Box h="18px" mt="10px" fontSize="12.5px" color="var(--muted)">{note}</Box>
       <Text fontSize="12px" color="var(--muted)" mt="8px" lineHeight="1.55">
-        I’m an AI, not a doctor. In an emergency call 1122. Calls are recorded for safety and quality. Demo with synthetic data.
+        I’m an AI testing agent, not a professional doctor. In an emergency call 1122. Calls are recorded for safety and quality. Demo with synthetic data.
       </Text>
     </motion.div>
   );

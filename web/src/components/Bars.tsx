@@ -1,8 +1,28 @@
 import { Box, Flex, Input, Text } from "@chakra-ui/react";
 import { useEffect, useState } from "react";
-import { FiMic, FiMicOff, FiPhoneOff, FiSend, FiSliders, FiType } from "react-icons/fi";
+import { FiGlobe, FiMic, FiMicOff, FiPhoneOff, FiSend, FiSliders, FiType } from "react-icons/fi";
 import { call } from "../net/call";
 import { useStore } from "../store";
+
+export function LanguageSelect() {
+  const lang = useStore((s) => s.lang);
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+      <FiGlobe aria-hidden />
+      <select
+        className="ctl sm"
+        aria-label="Language"
+        value={lang}
+        onChange={(e) => call.setLanguage(e.target.value as "en" | "hi" | "ur")}
+        style={{ appearance: "none", padding: "0 14px", cursor: "pointer", fontFamily: "inherit" }}
+      >
+        <option value="en">English</option>
+        <option value="hi">हिन्दी</option>
+        <option value="ur">اردو</option>
+      </select>
+    </label>
+  );
+}
 
 export function TopBar() {
   const session = useStore((s) => s.session);
@@ -13,11 +33,14 @@ export function TopBar() {
   return (
     <Flex zIndex={3} px={{ base: "20px", md: "36px" }} pt={{ base: "18px", md: "26px" }} align="center" justify="space-between">
       <Text fontWeight="600" fontSize="17px" letterSpacing="-0.01em">{session?.assistant ?? name}</Text>
-      {phase === "live" && (
-        <button className="ctl sm" onClick={() => useStore.getState().set({ drawer: !drawer })} aria-label="Show details" aria-pressed={drawer}>
-          <FiSliders /> Details
-        </button>
-      )}
+      <Flex align="center" gap="10px">
+        <LanguageSelect />
+        {phase === "live" && (
+          <button className="ctl sm" onClick={() => useStore.getState().set({ drawer: !drawer })} aria-label="Show details" aria-pressed={drawer}>
+            <FiSliders /> Details
+          </button>
+        )}
+      </Flex>
     </Flex>
   );
 }
@@ -53,7 +76,7 @@ export function BottomBar() {
       <Flex justify="center" align="center" wrap="wrap" gap="6px 14px" mt="16px" fontSize="12.5px" color="var(--muted)">
         <button className="link" disabled={!!handover} onClick={() => call.requestHuman()}>Talk to a person</button>
         <span style={{ color: mode === "emergency" ? "var(--bad)" : undefined, fontWeight: mode === "emergency" ? 600 : 400 }}>
-          AI assistant, not a doctor · In an emergency call {emergency}
+          AI testing agent, not a professional doctor · In an emergency call {emergency}
         </span>
       </Flex>
     </Box>

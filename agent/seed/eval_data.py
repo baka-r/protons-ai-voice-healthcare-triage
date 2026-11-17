@@ -131,8 +131,8 @@ SINGLE_TURN: list[Case] = [
     C("appointment_symptom_reason", "en", "I have a headache and want an appointment", NO, rules=ANY, llm=True,
       notes="symptom as reason for visit: fine with AI safety net online; rules-only mode hands over (stricter)"),
     C("appointment_symptom_reason", "en", "I have knee pain and need an orthopedic appointment", NO, rules=ANY, llm=True),
-    C("appointment_roman", "ur-roman", "mujhe appointment chahiye", "handover:language", rules="intent:book_appointment", llm=True,
-      notes="Urdu voice is not available yet: with the LLM online the call is handed to staff politely"),
+    C("appointment_roman", "ur-roman", "mujhe appointment chahiye", "intent:book_appointment", llm=True,
+      notes="Urdu/Hindi callers are now served in their language"),
     # ---------------------------------------------------------------- in-scope: hospital information
     *[C("info", "en", t, "intent:hospital_info") for t in [
         "what are your OPD timings", "what are the visiting hours", "is there parking", "where is the hospital located",
@@ -238,3 +238,19 @@ SCENARIOS: dict[str, list[dict]] = {
         {"say": "that's all", "state": "ENDED"},
     ],
 }
+
+# --------------------------------------------------------------------------- Hindi (Devanagari) cases
+SINGLE_TURN += [
+    *[C("emergency_hi", "hi", t, E) for t in [
+        "मुझे सीने में दर्द है", "सांस नहीं आ रही है", "वह बेहोश हो गया", "बहुत खून बह रहा है", "बच्चा सांस नहीं ले रहा", "एम्बुलेंस बुलाओ",
+        "दिल का दौरा पड़ा है", "उसने ज़हर खा लिया", "मेरी जान बचाओ", "बहुत तेज दर्द है", "सांस लेने में तकलीफ हो रही है", "मुझे दौरा पड़ा है",
+    ]],
+    *[C("distress_hi", "hi", t, D) for t in ["मैं आत्महत्या करना चाहता हूँ", "मैं मर जाना चाहती हूँ"]],
+    *[C("human_hi", "hi", t, H) for t in ["मुझे स्टाफ से बात करनी है", "किसी इंसान से बात कराइए"]],
+    C("appointment_hi", "hi", "मुझे अपॉइंटमेंट बुक करना है", "intent:book_appointment"),
+    C("appointment_hi", "hi", "मुझे अपॉइंटमेंट रद्द करना है", "intent:cancel_appointment"),
+    C("info_hi", "hi", "ओपीडी का समय क्या है", "intent:hospital_info"),
+    C("info_hi", "hi", "पार्किंग कहाँ है", "intent:hospital_info"),
+    C("persona_hi", "hi", "आप कौन हैं", "intent:identity_question"),
+    C("persona_hi", "hi", "धन्यवाद", "intent:thanks"),
+]

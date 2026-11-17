@@ -25,7 +25,44 @@ MAX_DYNAMIC_MEM = 150  # entries kept in memory
 MAX_DYNAMIC_DISK = 600  # files kept on disk
 DYNAMIC_MAX_AGE_S = 3 * 86400
 
-_SENT = re.compile(r"(?<=[.!?])\s+")
+import numpy as np
+
+# Kokoro pads every utterance with ~300-400 ms of silence. Pieces are trimmed and joined with short, deliberate pauses instead.
+SILENCE_THRESHOLD = 250
+LEAD_KEEP_MS, TRAIL_KEEP_MS = 15, 40
+HOLD_BYTES = int(SAMPLE_RATE * 0.5) * 2  # tail held back while streaming, so trailing silence can be cut
+PAUSE_SENTENCE_MS, PAUSE_CLAUSE_MS, PAUSE_LINE_MS = 190, 60, 230
+
+
+def silence(ms: int) -> bytes:
+    return bytes(int(SAMPLE_RATE * ms / 1000) * 2)
+
+
+def pause_ms(prev_piece: str) -> int:
+    p = prev_piece.rstrip()
+    if p.endswith((".", "!", "?", "।")):
+        return PAUSE_SENTENCE_MS
+    if p.endswith((",", ";", ":")):
+        return PAUSE_CLAUSE_MS
+    return 90
+
+
+def _speech_bounds(x: np.ndarray) -> tuple[int, int] | None:
+    idx = np.flatnonzero(np.abs(x.astype(np.int32)) > SILENCE_THRESHOLD)
+    return (int(idx[0]), int(idx[-1])) if len(idx) else None
+
+
+def trim_pcm(pcm: bytes) -> bytes:
+    x = np.frombuffer(pcm, dtype=np.int16)
+    b = _speech_bounds(x) if len(x) else None
+    if b is None:
+        return pcm
+    a = max(0, b[0] - int(SAMPLE_RATE * LEAD_KEEP_MS / 1000))
+    z = min(len(x), b[1] + int(SAMPLE_RATE * TRAIL_KEEP_MS / 1000))
+    return x[a:z].tobytes()
+
+
+_SENT = re.compile(r"(?<=[.!?।])\s+")
 _CLAUSE = re.compile(r"(?<=[,;:])\s+")
 
 
@@ -63,8 +100,8 @@ class TTS:
         self._inflight: dict[str, asyncio.Future] = {}  # single-flight: identical sentences share one synthesis
         self._prune_disk()
 
-    def _key(self, text: str) -> str:
-        return hashlib.sha1(f"{self.s.tts_voice}|{self.s.tts_speed}|{text}".encode()).hexdigest()
+    def _key(self, text: str, voice: str | None = None) -> str:
+        return hashlib.sha1(f"v2trim|{voice or self.s.tts_voice}|{self.s.tts_speed}|{text}".encode()).hexdigest()
 
     def _prune_disk(self) -> None:
         try:
@@ -79,8 +116,8 @@ class TTS:
         except OSError:
             pass
 
-    def cached(self, text: str) -> bytes | None:
-        k = self._key(text)
+    def cached(self, text: str, voice: str | None = None) -> bytes | None:
+        k = self._key(text, voice)
         if k in self.fixed:
             return self.fixed[k]
         if k in self.dynamic:
@@ -103,8 +140,8 @@ class TTS:
         while len(self.dynamic) > MAX_DYNAMIC_MEM:
             self.dynamic.popitem(last=False)
 
-    def _store(self, text: str, pcm: bytes, fixed: bool = False) -> None:
-        k = self._key(text)
+    def _store(self, text: str, pcm: bytes, fixed: bool = False, voice: str | None = None) -> None:
+        k = self._key(text, voice)
         try:
             if fixed:
                 self.fixed[k] = pcm
@@ -122,9 +159,9 @@ class TTS:
         except Exception:
             return False
 
-    async def _stream_raw(self, text: str) -> AsyncIterator[bytes]:
+    async def _stream_raw(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
         payload = {
-            "model": "kokoro", "input": text, "voice": self.s.tts_voice,
+            "model": "kokoro", "input": text, "voice": voice or self.s.tts_voice,
             "response_format": "pcm", "speed": self.s.tts_speed, "stream": True,
         }
         carry = b""
@@ -140,15 +177,15 @@ class TTS:
                     if data:
                         yield data
 
-    async def stream_shared(self, text: str) -> AsyncIterator[bytes]:
+    async def stream_shared(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
         """Cached -> yield it. Already being synthesised for someone else -> wait for that result.
         Otherwise stream it (first audio leaves immediately) and publish the finished audio to waiters."""
         for _ in range(2):
-            hit = self.cached(text)
+            hit = self.cached(text, voice)
             if hit is not None:
                 yield hit
                 return
-            k = self._key(text)
+            k = self._key(text, voice)
             fut = self._inflight.get(k)
             if fut is None:
                 break
@@ -156,35 +193,61 @@ class TTS:
             if data:
                 yield data
                 return
-        k = self._key(text)
+        k = self._key(text, voice)
         fut = asyncio.get_running_loop().create_future()
         self._inflight[k] = fut
         buf, done = bytearray(), False
+        pend, started = bytearray(), False
         try:
-            async for chunk in self._stream_raw(text):
-                buf += chunk
-                yield chunk
+            async for chunk in self._stream_raw(text, voice):
+                pend += chunk
+                if not started:  # drop leading silence as soon as speech begins
+                    b = _speech_bounds(np.frombuffer(bytes(pend), dtype=np.int16))
+                    if b is None:
+                        continue
+                    cut = max(0, b[0] - int(SAMPLE_RATE * LEAD_KEEP_MS / 1000)) * 2
+                    del pend[:cut]
+                    started = True
+                if len(pend) > HOLD_BYTES:  # stream everything except a held-back tail (may be trailing silence)
+                    out = bytes(pend[: len(pend) - HOLD_BYTES])
+                    del pend[: len(pend) - HOLD_BYTES]
+                    buf += out
+                    yield out
+            tail = trim_pcm(bytes(pend)) if started else bytes(pend)
+            if tail:
+                buf += tail
+                yield tail
             done = True
         finally:
             if self._inflight.get(k) is fut:
                 self._inflight.pop(k, None)
             data = bytes(buf) if done and buf else None
             if data:
-                self._store(text, data)
+                self._store(text, data, voice=voice)
             if not fut.done():
                 fut.set_result(data)
 
-    async def render(self, text: str, fixed: bool = False) -> bytes:
-        hit = self.cached(text)
+    async def render(self, text: str, fixed: bool = False, voice: str | None = None) -> bytes:
+        hit = self.cached(text, voice)
         if hit is not None:
             return hit
         buf = bytearray()
-        async for chunk in self.stream_shared(text):
+        async for chunk in self.stream_shared(text, voice):
             buf += chunk
         pcm = bytes(buf)
         if pcm and fixed:
-            self._store(text, pcm, fixed=True)
+            self._store(text, pcm, fixed=True, voice=voice)
         return pcm
+
+    async def warm_voice(self, lines: dict[str, str], voice: str | None) -> None:
+        """Pre-render lines in a specific voice (e.g. Hindi). Best effort, in the background."""
+        for text in dict.fromkeys(lines.values()):
+            if self.cached(text, voice) is not None:
+                continue
+            try:
+                await self.render(text, fixed=True, voice=voice)
+            except Exception:
+                await asyncio.sleep(2)
 
     async def warm(self, lines: dict[str, str]) -> None:
         """Pre-render fixed scripts (retries until the TTS container is up)."""

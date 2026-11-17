@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+export type Lang = "en" | "hi" | "ur";
 export type Phase = "boot" | "connecting" | "live" | "ended";
 export type UiState = "idle" | "listening" | "thinking" | "speaking" | "handover" | "connected" | "ended";
 export type Mode = "normal" | "handover" | "emergency" | "connected";
@@ -20,6 +21,7 @@ interface S {
   playing: boolean;
   muted: boolean;
   sfx: boolean;
+  lang: Lang;
   micError: string | null;
   error: string | null;
   captions: Caption[];
@@ -41,8 +43,11 @@ interface S {
 }
 
 let seq = 1;
+function readLang(): Lang {
+  try { const v = localStorage.getItem("hania_lang"); return v === "hi" || v === "ur" ? v : "en"; } catch { return "en"; }
+}
 const initial = {
-  phase: "boot" as Phase, ui: "idle" as UiState, mode: "normal" as Mode, playing: false, muted: false, sfx: true,
+  phase: "boot" as Phase, ui: "idle" as UiState, mode: "normal" as Mode, playing: false, muted: false, sfx: true, lang: "en" as Lang,
   micError: null, error: null, captions: [], trace: [], steps: {}, safety: { redflag: "ok", scope: "ok", pii: "on", llm_check: "ok" },
   sources: [], timing: {}, intent: null, session: null, handover: null,
 };
@@ -50,6 +55,7 @@ const initial = {
 export const useStore = create<S>((set) => ({
   ...initial,
   status: null,
+  lang: readLang(),
   drawer: false,
   set: (p) => set(p),
   addCaption: (c) => set((s) => ({ captions: [...s.captions.slice(-40), { ...c, id: seq++ }] })),
@@ -59,5 +65,5 @@ export const useStore = create<S>((set) => ({
       steps: { ...s.steps, [t.step]: { status: t.status, detail: t.detail } },
     })),
   resetTurn: () => set({ steps: {}, sources: [] }),
-  reset: () => set({ ...initial }),
+  reset: () => set((s) => ({ ...initial, lang: s.lang })),
 }));
