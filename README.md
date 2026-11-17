@@ -1,103 +1,86 @@
-# Aria — hospital voice assistant (MVP demo)
+# Hania — hospital voice assistant (MVP demo)
 
-A Jarvis-style voice assistant for a hospital. It answers appointment and hospital-information
-calls, **never diagnoses or advises on medicine**, and hands the call to a human when it is unsure
-or when anything looks like an emergency. The hand-over is **simulated**: a staff web page shows the
-incoming call; no real telephony is involved.
+A calm voice assistant for a hospital. Hania books, changes and cancels appointments, answers hospital questions from approved
+documents, and talks through common health concerns **like a caring doctor would** — asking follow-up questions, looking up
+MedlinePlus, and explaining what something *could* be. She always says she is an **AI testing agent, not a professional doctor**.
+She connects the caller to a human **only** for emergencies, distress, or when the caller asks. The hand-over is **simulated**
+(a staff web page shows the incoming call; no real telephony).
 
-> **Demo only. Synthetic data only. Not clinically approved.** The red-flag list and spoken scripts are
-> drafts that a clinician must review before any real use.
+> **Demo only. Synthetic data only. Not clinically approved.** Red-flag rules, scripts and the doctor-mode prompt are drafts that a
+> clinician must review before any real use.
 
-## Run it (Docker only)
+Live demo: https://protons.upscaleleads.cloud  ·  staff console: `/staff`
+
+## Run it locally (Docker only)
 
 ```bash
+cp .env.example .env     # add your keys
 docker compose up -d --build
 ```
 
 | URL | What |
 |---|---|
-| http://localhost:8080 | The call screen (press **Begin call**, allow the microphone) |
-| http://localhost:8080/staff | Staff console (PIN from `.env`, default `1234`) |
-| http://localhost:8000/api/health | Component health |
+| http://localhost:8080 | Call screen (allow the microphone; or use the keyboard button to type) |
+| http://localhost:8080/staff | Staff console (PIN from `.env`) |
+| http://localhost:8000/api/health | Liveness |
 
-First start downloads the Kokoro voice image and models (a few minutes). Use headphones for the
-best demo (echo cancellation works, but a headset is cleaner).
+First start downloads the voice image (~5 GB) and models. Use headphones for the cleanest demo.
+Secrets live in `.env` (gitignored). **Rotate any key that was ever pasted into a chat or committed.**
 
-Secrets live in `.env` (gitignored; copy `.env.example`). Only the `agent` container receives API keys;
-the browser never sees them. **Rotate any key that has been pasted into a chat or committed anywhere.**
-
-## Try these
+## What Hania does
 
 | Say | What happens |
 |---|---|
-| "I'd like to book an appointment" → name **Ayesha Khan**, DOB **12 March 1990** → "cardiology" → "tomorrow" → pick a time → "yes" | Verified against the mock EMR, booked |
-| "Cancel my appointment" / "Reschedule my appointment" | Finds Ayesha's seeded Cardiology visit |
-| "What are your OPD timings?" / "Is there parking?" | Spoken verbatim from **approved** documents only |
-| "I have chest pain" | Emergency path: stops normal replies, alerts staff, tells the caller to call 1122 |
-| "What medicine should I take for a fever?" | Refused (no medical advice) and handed to staff |
-| "Can I talk to a person?" or the **Talk to a person** button | Simulated hand-over; open `/staff` and press **Accept** |
-| Keep a typed fallback: **Type** button | Same pipeline without the microphone |
+| "I'm feeling sick, I'm vomiting, what should I do?" | Disclaimer, a follow-up question or two, then possible common explanations, self-care and warning signs (no medicines/doses) |
+| "I'd like to book an appointment" → name **Ayesha Khan**, DOB **12 March 1990** → department → date → time → yes | Verified against the mock EMR, booked |
+| "What are the visiting hours?" | Spoken verbatim from **approved** documents |
+| "I have chest pain" / "I can't breathe" | Emergency path: tells the caller to call 1122 and alerts staff |
+| "Can I talk to a person?" or the link below the controls | Simulated hand-over; open `/staff` and press **Accept** |
 
-Demo identities (synthetic): Ayesha Khan 1990-03-12, Hamza Ali 1985-07-21, Fatima Noor 2001-11-05,
-Usman Raza 1978-01-30, Sara Malik 1995-09-18.
+Synthetic identities: Ayesha Khan 1990-03-12, Hamza Ali 1985-07-21, Fatima Noor 2001-11-05, Usman Raza 1978-01-30, Sara Malik 1995-09-18.
 
-## How it stays safe
+## Safety design
 
-1. **Red-flag rules run first on every utterance** (English, Urdu script, Roman Urdu). Hit → emergency hand-over.
-2. **The AI can only add caution.** A second LLM check runs in parallel; if it flags something the call goes to a human. It can never cancel a rule hit.
-3. **The AI never writes what the caller hears.** Replies are fixed scripts, templates, or approved document text.
-4. **Allow-listed intents only:** appointments, hospital info, "a person". Everything else → refuse + offer staff.
-5. **Output guard:** dynamic text containing dosage, drug or diagnosis language is replaced by a hand-over.
-6. **Fail closed:** low speech confidence twice, 3 failed ID checks, LLM timeout, any exception → human.
-7. **Identity details are parsed locally** and never sent to the cloud LLM; stored utterances are PII-masked.
-8. **Only approved, current, latest-version documents** are ever embedded. Drafts, superseded and expired ones are recorded but excluded.
-9. **Audit log** is append-only and hash-chained (`GET /api/audit/verify` with the staff PIN header).
+1. **Red-flag rules run first on every utterance** (English, Urdu script, Roman Urdu). A hit means emergency hand-over; the AI can never cancel it.
+2. **A second AI check runs in parallel** and can only *add* caution (interrupting an already-given reply if needed).
+3. **Doctor mode limits are enforced in code**, not just in the prompt: possible explanations only (never "you have X"), no medicine names or doses,
+   an output guard rejects any reply that breaks this, and anything uncertain falls back to a fixed interview or staff. Babies, children and pregnancy get extra caution.
+4. **Allow-listed actions:** appointments, approved hospital information, general health conversation, hand-over.
+5. **Fail closed:** unclear speech twice, 3 failed ID checks, AI outage while symptoms are mentioned, any exception → a human.
+6. **Privacy:** identity details are parsed locally and never sent to the cloud LLM; stored transcripts and staff views are PII-masked; only symptom words go to MedlinePlus.
+7. **Security:** HMAC staff tokens + login lockout, cross-origin websocket rejection, rate limits and per-IP caps, hardened non-root containers,
+   CSP and security headers, hash-chained audit log, production start-up refuses weak secrets.
 
 ## Architecture
 
 ```
-Browser (Chakra UI + Motion + three.js HUD, Silero VAD in-browser)
-   │  WebSocket: 16 kHz PCM up, 24 kHz PCM down
-   ▼
-agent (FastAPI) ── STT (OpenAI/Groq/local) ── safety rules ── LLM classifier (gpt-6-luna, effort=low)
-   │                                            │                 └─ strict JSON, can only add caution
-   │                                            ├─ mock-emr (FHIR-style, synthetic)
-   │                                            ├─ ChromaDB + fastembed (approved docs only)
-   │                                            └─ PostgreSQL (ERD: sessions, utterances, escalations, audit…)
-   └─ TTS ── tts (Kokoro-82M, female voice af_heart, local)
+Browser (React + Chakra + Motion, Silero VAD in-browser) --WebSocket--> nginx --> agent (FastAPI)
+   agent: STT (Groq key pool -> OpenAI -> local whisper)  ->  safety rules  ->  dialog engine
+          LLM (OpenAI -> Groq key pool: classifier, doctor mode)  |  MedlinePlus / Wikipedia lookup
+          mock EMR (FHIR-style) | ChromaDB + fastembed (approved docs) | PostgreSQL (ERD, audit)
+          TTS: Kokoro-82M female voice (local), fixed lines + booking phrases pre-rendered
 ```
 
-## Latency design
+## Evidence (from this repo)
 
-Browser-side VAD ends a turn quickly; fixed lines (greeting, refusals, hand-over) are **pre-rendered**
-and play instantly; dynamic replies are synthesised **sentence by sentence**; speaking stops the moment
-you talk (barge-in); the LLM runs at `reasoning effort = low`; a "one moment" filler plays if a turn
-exceeds ~0.9 s. The HUD shows live per-turn timings. Measure on your machine — CPU-only TTS is the
-main variable.
+* 218 unit tests; a ~1,200-case synthetic safety regression (emergency/distress/abuse recall 100%, 0 leaks, 0 false escalations, 12/12 multi-turn scenarios).
+* Live e2e suite (security, persona, doctor mode, booking, concurrency, audit) and a latency benchmark: rule-answered turns ~10–80 ms server time,
+  voice turns ~300–900 ms from end of speech to first audio (excludes the ~380 ms end-of-speech wait in the browser).
+* These are regression/engineering evidence, **not** clinical validation.
 
-## Configuration (`.env`)
+## Operate
 
-See `.env.example`. Useful switches: `LLM_PROVIDER=openai|groq`, `LLM_MODEL`, `LLM_REASONING_EFFORT`
-(keep `none`/`low` for speed; `high` is used only for staff hand-over summaries), `STT_PROVIDER=openai|groq|local`,
-`TTS_VOICE`, `TTS_SPEED`.
-
-Optional: free offline speech-to-text — `docker compose build --build-arg WITH_LOCAL_STT=1 agent`, then
-`STT_PROVIDER=local` (slower on CPU). NVIDIA GPU for the voice: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`.
-HTTPS for phone demos: `docker compose --profile https up -d` then open `https://<your-pc-ip>:8443`.
-
-## Tests
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): production overlay, shared-proxy or standalone Caddy, backups, monitoring, rotation.
 
 ```bash
-docker compose build agent
-docker run --rm protons-triage-agent python -m pytest -q
+docker run --rm protons-triage-agent python -m pytest -q          # after: docker compose build agent
+docker compose exec -T agent python - < scripts/e2e_live.py        # live end-to-end
+docker compose exec -T agent python - < scripts/bench_latency.py   # latency
+docker compose exec agent python -m app.seed_db                    # seed synthetic data
 ```
-
-Covers red-flag recall/precision on a synthetic English/Urdu/Roman-Urdu corpus, the output guard, document
-approval rules, the audit hash chain, and the dialog engine flows (with fake LLM/EMR/RAG).
 
 ## Known limits
 
-- English voice only. Urdu callers are understood well enough to be handed to staff, but there is no free Urdu voice with a clean licence (MMS-TTS is non-commercial).
-- Speech goes to a cloud STT provider by default; use synthetic data and team voices only. Switch to `STT_PROVIDER=local` to stay on-machine.
-- The mock EMR is FHIR-*style*, not a full FHIR R4 server. Staff console auth is a shared demo PIN.
-- Schema is created with `create_all` (no Alembic migrations yet). Concurrency tested lightly.
+* English voice only; Urdu callers are handed to staff (no suitably licensed free Urdu voice).
+* Speech and text go to cloud STT/LLM providers (Groq/OpenAI): use synthetic data and team voices only, or set `STT_ROUTE_ORDER=local`.
+* Mock EMR, shared demo staff PIN, no SSO; schema via `create_all` (no migrations yet); one agent process holds live-call state in memory.

@@ -90,3 +90,16 @@ live-call state in memory, so scale **up** first; scaling out needs sticky sessi
 4. A real telephony/hand-over path (SIP/PBX) and staff authentication (SSO) replacing the demo PIN.
 5. A staffed escalation process: an unattended hand-over queue is a patient-safety hazard.
 6. Urdu voice: there is no suitably licensed free Urdu voice; Urdu callers are currently handed to staff.
+
+## 10. Deployed instance: shared-proxy layout (protons.upscaleleads.cloud)
+
+The VPS already runs another project with its own Caddy on ports 80/443, so this stack publishes **no host ports** and is reached
+through that Caddy:
+
+* Code: `/opt/protons` (cloned from GitHub). Secrets: `/opt/protons/.env` (chmod 600, never committed). Staff PIN: `/root/protons_staff_pin.txt`.
+* Start/update: `cd /opt/protons && git pull && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`
+* Edge network: only the `hania-web` container joins `protons_edge`; the existing Caddy is attached with
+  `docker network connect protons_edge pusula-caddy-1` and has the site block from `deploy/Caddyfile.shared-proxy` appended to `/etc/pusula/Caddyfile`
+  (backup: `/etc/pusula/Caddyfile.bak-protons-*`). Reload: `docker exec pusula-caddy-1 caddy reload --config /etc/caddy/Caddyfile`.
+* **If the other project's Caddy container is recreated**, re-attach it (`docker network connect protons_edge pusula-caddy-1`) or the site returns 502 until you do.
+* Rollback of the proxy change: restore the backup Caddyfile and reload; `docker compose ... down` removes only this project's containers.
