@@ -26,7 +26,41 @@ export class CallClient {
   private waiting = false;
   private closed = false;
 
+  private vadCtx?: AudioContext;
+  private micStream?: Promise<MediaStream>;
+  private blockedPoll = 0;
+
+  /** iPhone/Safari only allows audio and the microphone to start INSIDE the tap itself. This must run before any `await` in begin(). */
+  private unlockAudio() {
+    try {
+      const as = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+      if (as) as.type = "play-and-record"; // speaker output while the mic is open; not muted by the silent switch
+    } catch { /* not supported */ }
+    try {
+      this.vadCtx = new AudioContext();
+      void this.vadCtx.resume();
+    } catch { /* no Web Audio */ }
+    if (navigator.mediaDevices?.getUserMedia) {
+      this.micStream = navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      this.micStream.catch(() => undefined); // the error is reported in startMic
+    } else {
+      this.micStream = Promise.reject(new Error("no-mic-api"));
+      this.micStream.catch(() => undefined);
+    }
+    document.addEventListener("pointerdown", this.onGesture, { passive: true });
+  }
+
+  private onGesture = () => { this.unlock(); };
+
+  /** Resume any audio context the browser put to sleep (called on every tap and by the "Tap to turn on sound" button). */
+  unlock() {
+    for (const c of [this.player?.ctx, this.vadCtx]) {
+      if (c && c.state !== "running") void c.resume().catch(() => undefined);
+    }
+  }
+
   async begin() {
+    this.unlockAudio();
     const st = useStore.getState();
     st.reset();
     this.closed = false;
@@ -69,6 +103,10 @@ export class CallClient {
   }
 
   private loop = () => {
+    if (++this.blockedPoll % 30 === 0) {
+      const blocked = [this.player?.ctx, this.vadCtx].some((c) => !!c && c.state !== "running");
+      if (blocked !== useStore.getState().audioBlocked) useStore.getState().set({ audioBlocked: blocked });
+    }
     this.player?.tick();
     levels.mic *= 0.9;
     levels.level = Math.max(levels.tts, levels.mic);
@@ -85,10 +123,8 @@ export class CallClient {
         redemptionMs: REDEMPTION_MS,
         preSpeechPadMs: 250,
         minSpeechMs: 250,
-        getStream: () =>
-          navigator.mediaDevices.getUserMedia({
-            audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-          }),
+        audioContext: this.vadCtx,
+        getStream: () => this.micStream ?? navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
         onFrameProcessed: (_p, frame) => {
           let sum = 0;
           for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
@@ -102,7 +138,12 @@ export class CallClient {
       useStore.getState().set({ micError: null });
     } catch (e) {
       console.warn("microphone unavailable", e);
-      useStore.getState().set({ micError: "Microphone unavailable. You can type instead." });
+      const name = (e as { name?: string })?.name ?? "";
+      const msg = name === "NotAllowedError" || name === "SecurityError"
+        ? "Microphone is blocked. Allow it for this site in your browser settings, then start again. You can type meanwhile."
+        : name === "NotFoundError" ? "No microphone found. You can type instead."
+        : "Microphone unavailable. You can type instead.";
+      useStore.getState().set({ micError: msg });
     }
   }
 
@@ -172,7 +213,12 @@ export class CallClient {
 
   private teardown() {
     cancelAnimationFrame(this.raf);
+    document.removeEventListener("pointerdown", this.onGesture);
+    void this.micStream?.then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => undefined);
     void this.vad?.destroy();
+    void this.vadCtx?.close().catch(() => undefined);
+    this.vadCtx = undefined;
+    this.micStream = undefined;
     this.player?.close();
     this.ws?.close();
   }
