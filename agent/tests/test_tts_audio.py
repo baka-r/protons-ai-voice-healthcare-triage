@@ -23,3 +23,29 @@ def test_pauses_depend_on_punctuation():
 
 def test_silence_length():
     assert len(silence(100)) == int(SAMPLE_RATE * 0.1) * 2 and HOLD_BYTES % 2 == 0
+
+
+# ---------------------------------------------------------------- service numbers are read digit by digit
+def test_service_numbers_are_spoken_as_digits():
+    from app.services.tts import say_digits, spoken
+
+    assert say_digits("1122") == "double one double two"
+    assert say_digits("115") == "double one five"
+    assert say_digits("999") == "triple nine"
+    assert spoken("please call 1122 right now") == "please call double one double two right now"
+    assert spoken("In an emergency, call 1122.") == "In an emergency, call double one double two."
+    assert spoken("call 911, then 115") == "call nine double one, then double one five"
+    # ordinary numbers are left alone
+    assert spoken("Come in 15 minutes") == "Come in 15 minutes"
+    assert spoken("The fee is 11220 rupees") == "The fee is 11220 rupees"
+    assert spoken("it costs 1,122 rupees") == "it costs 1,122 rupees"
+    assert spoken("it is 3.1122") == "it is 3.1122"
+
+
+def test_lines_with_a_service_number_use_a_new_cache_version():
+    from app.config import Settings
+    from app.services.tts import TTS
+
+    t = TTS(Settings())
+    plain = t._key("hello there")
+    assert plain != t._key("call 1122 now")

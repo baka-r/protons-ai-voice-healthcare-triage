@@ -34,6 +34,42 @@ HOLD_BYTES = int(SAMPLE_RATE * 0.5) * 2  # tail held back while streaming, so tr
 PAUSE_SENTENCE_MS, PAUSE_CLAUSE_MS, PAUSE_LINE_MS = 190, 60, 230
 
 
+_DIGIT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+
+
+def say_digits(number: str) -> str:
+    """'1122' -> 'double one double two' (how emergency numbers are said aloud). Runs of 2 are 'double', of 3 'triple'."""
+    out, i = [], 0
+    while i < len(number):
+        j = i
+        while j < len(number) and number[j] == number[i]:
+            j += 1
+        run, word = j - i, _DIGIT_WORDS[int(number[i])]
+        while run:
+            if run >= 3:
+                out.append(f"triple {word}")
+                run -= 3
+            elif run == 2:
+                out.append(f"double {word}")
+                run -= 2
+            else:
+                out.append(word)
+                run -= 1
+        i = j
+    return " ".join(out)
+
+
+def number_pattern(emergency_number: str = "1122") -> re.Pattern[str]:
+    """Service numbers that must be read digit by digit (a TTS engine would say 'one thousand one hundred twenty-two')."""
+    nums = {n for n in (emergency_number, "1122", "115", "911", "999") if n.isdigit()}
+    return re.compile(r"(?<!\d)(?<!\d[.,])(" + "|".join(sorted(nums, key=len, reverse=True)) + r")(?!\d|[.,]\d|\s?(?:minutes?|mins?|hours?|days?|rupees|pkr|mg|ml))")
+
+
+def spoken(text: str, pattern: re.Pattern[str] | None = None) -> str:
+    """The words the voice engine should be given. Captions keep the written form ('1122')."""
+    return (pattern or number_pattern()).sub(lambda m: say_digits(m.group(1)), text)
+
+
 def silence(ms: int) -> bytes:
     return bytes(int(SAMPLE_RATE * ms / 1000) * 2)
 
@@ -86,6 +122,7 @@ def split_sentences(text: str, min_len: int = 24) -> list[str]:
 class TTS:
     def __init__(self, settings: Settings):
         self.s = settings
+        self._numbers = number_pattern(settings.emergency_number)
         self.http = httpx.AsyncClient(base_url=settings.tts_url, timeout=httpx.Timeout(30.0, connect=3.0))
         self.fixed: dict[str, bytes] = {}
         self.dynamic: OrderedDict[str, bytes] = OrderedDict()
@@ -103,7 +140,9 @@ class TTS:
         self._prune_disk()
 
     def _key(self, text: str, voice: str | None = None) -> str:
-        return hashlib.sha1(f"v2trim|{voice or self.s.tts_voice}|{self.s.tts_speed}|{text}".encode()).hexdigest()
+        # lines containing a service number are cached under a new version: audio rendered before the digit-by-digit fix said "one thousand one hundred..."
+        ver = "v3num" if self._numbers.search(text) else "v2trim"
+        return hashlib.sha1(f"{ver}|{voice or self.s.tts_voice}|{self.s.tts_speed}|{text}".encode()).hexdigest()
 
     def _prune_disk(self) -> None:
         try:
@@ -163,7 +202,7 @@ class TTS:
 
     async def _stream_raw(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
         payload = {
-            "model": "kokoro", "input": text, "voice": voice or self.s.tts_voice,
+            "model": "kokoro", "input": spoken(text, self._numbers), "voice": voice or self.s.tts_voice,
             "response_format": "pcm", "speed": self.s.tts_speed, "stream": True,
         }
         carry = b""
