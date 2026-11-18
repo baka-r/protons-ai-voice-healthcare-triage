@@ -100,3 +100,16 @@ Run these in the live UI (English, Hindi, Urdu where possible) and record the re
 | Native Hindi/Urdu reviewer | | | | |
 | Compliance / DPO | | | | |
 | Engineering lead | | | | |
+
+---
+
+## 10. Added in the demo-readiness pass (review these too)
+- [ ] **Urgency tiers** (Home care / See a doctor soon / Same-day attention / Emergency). Check the rules in `agent/app/dialog/triage.py`: a danger answer is Same-day; "prolonged" symptoms are at least "See a doctor soon"; adults 65+ and children are never Home care; a baby or young child with fever, vomiting or diarrhoea is Same-day. Tier wording spoken to the patient: `tier_line()`.
+- [ ] **Age intake**: the first question of every structured interview is the patient's age. Is that the right first question? Which other facts must be asked first (pregnancy, diabetes, heart disease, medicines, allergies)? Today only age is collected.
+- [ ] **18 symptom topics** (9 new: back pain, joint/muscle pain, ear pain, toothache, eye irritation, burning urine, constipation, trouble sleeping, tiredness) and their guidance in `agent/knowledge/symptom_guidance.md`. Which of these should NOT be handled by a bot? Which important complaints are missing (target about 30, chosen by you)?
+- [ ] **Doctor mode now rates urgency itself** (`urgency` in the AI reply). It is a model opinion, labelled "assessed by the AI in doctor mode, not by a clinician". Age can only make it stricter. An "emergency" rating is only honoured at the assessment stage.
+- [ ] **When the AI is unavailable** (free-tier limit): a COMMON complaint that matches one of the 18 topics continues with the fixed yes/no interview (previously every symptom mention went straight to staff). Medicines, children, pregnancy and unknown complaints still go to staff. **Decide whether this fallback is acceptable.**
+- [ ] **Reference lookups** (MedlinePlus/Wikipedia) now use the matched topic label plus at most 3 words, because long free-text queries returned unrelated conditions (for example polio for a sore throat). Check what the lookup returns for 20 common complaints and decide whether Wikipedia should stay.
+- [ ] **Scenario file** `agent/seed/triage_scenarios.json`: add real cases. `python -m app.triage_eval` must pass before every release (emergency recall 100%, zero under-triage, every danger question hands over, medicine requests blocked).
+- [ ] **Doctor review console**: verdicts (Safe / Wrong / Unsafe + the right wording and urgency) are exported as test cases (`Export corrections`). Agree who reviews, how often, and what counts as "unsafe" (see the stop rule in `PILOT_PLAN.md`).
+- [ ] **Pakistan**: emergency number 1122; Urdu and Roman Urdu red-flag phrases need a native clinician; confirm PMDC and data-protection obligations with counsel.

@@ -157,6 +157,11 @@ class LLM:
     def enabled(self) -> bool:
         return any(not r.disabled for r in self.routes)
 
+    @property
+    def busy(self) -> bool:
+        """Every AI route is resting after a rate-limit (free tiers do this under load): Hania is in limited, rules-only mode."""
+        return self.enabled and not any(r.available() for r in self.routes)
+
     def status(self) -> list[dict]:
         return snapshot(self.routes)
 

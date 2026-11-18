@@ -101,7 +101,9 @@ _MEDICAL = re.compile(
 _SYMPTOMS = re.compile(
     r"\b(pain|painful|ache|aching|hurts?|bleed\w*|blood|vomit\w*|nausea|nauseous|dizzy|dizziness|faint\w*|fever|rash|"
     r"swell\w*|swollen|sweat\w*|numb|numbness|weakness|cough\w*|breath\w*|chest|headache|migraine|infection|injur\w*|wound|"
-    r"burn\w*|bite|bitten|seizure|confus\w*|palpitation\w*|cramp\w*|diarrh\w*|lump|symptom\w*|sick|unwell|ill)\b"
+    r"burn\w*|bite|bitten|seizure|confus\w*|palpitation\w*|cramp\w*|diarrh\w*|lump|symptom\w*|sick|unwell|ill|"
+    r"constipat\w*|fatigue\w*|exhausted|tired|insomnia|itch\w*|toothache|"
+    r"(can'?t|cannot) sleep|trouble sleeping|red eyes?|watery eyes?|eyes? (are|is|feel|feels)( very| so| really)? (red|itchy|watery|sore|irritated)|eye (pain|infection|irritation)|(burning|pain)( when| while| during)? (urinat\w*|peeing|pass(ing)? urine))\b"
     r"|dard|bukhar|khoon|ulti|chakkar|dard|ٹھیک نہیں|درد|بخار|خون|الٹی|چکر"
 )
 
@@ -141,7 +143,7 @@ _VULNERABLE = re.compile(
 
 
 def is_strict_medical(norm: str) -> bool:
-    return bool(_MED_STRICT.search(norm) or _VULNERABLE.search(norm))
+    return bool(_MED_STRICT.search(norm) or _VULNERABLE.search(norm) or _HI_MEDICAL.search(norm))
 
 
 # ---------------------------------------------------------------- Hindi (Devanagari) intents

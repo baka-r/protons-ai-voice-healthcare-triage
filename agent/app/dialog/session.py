@@ -34,6 +34,7 @@ class Reply:
     nlu_ms: int = 0
     event: dict[str, Any] | None = None  # side-effect event for persistence (e.g. appointment_booked)
     pending_analysis: Any = None  # asyncio.Task of the parallel AI safety check (reply already given; may interrupt)
+    triage: dict[str, Any] | None = None  # urgency tier + structured brief for this reply (shown in the UI, stored, given to staff)
 
 
 @dataclass
@@ -57,3 +58,5 @@ class Session:
     client_ip: str = "unknown"
     doctor_turns: int = 0  # follow-up questions asked in the current doctor-style conversation
     disclaimer_given: bool = False
+    triage: dict[str, Any] = field(default_factory=dict)  # intake facts (age) + the latest tier decision for this call
+    role: str = "patient"  # who is testing: patient | owner | doctor (set by the start screen; used for analytics only)

@@ -12,8 +12,9 @@ class FakeDoctor:
     def __init__(self, *replies):
         self.replies, self.calls = list(replies), []
 
-    async def advise(self, history, latest, label, turns):
+    async def advise(self, history, latest, label, turns, known=None):
         self.calls.append((latest, label, turns))
+        self.known = known
         return self.replies.pop(0) if self.replies else None
 
 

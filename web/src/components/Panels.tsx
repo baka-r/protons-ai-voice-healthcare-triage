@@ -1,8 +1,9 @@
 import { Box, Flex, Text } from "@chakra-ui/react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { FiVolume2, FiVolumeX, FiX } from "react-icons/fi";
 import { setSfxEnabled } from "../audio/sfx";
+import { call } from "../net/call";
 import { useStore } from "../store";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -124,6 +125,38 @@ function TraceSection() {
   );
 }
 
+interface Scenario { id: string; title: string; who: string; lang: string; say: string[]; shows: string }
+
+/** Click-through demo scripts for the owner / doctors / QA: each line is sent exactly as if it were typed or spoken. */
+function ScenariosSection() {
+  const [items, setItems] = useState<Scenario[]>([]);
+  const [open, setOpen] = useState<string | null>(null);
+  useEffect(() => { fetch("/api/demo/scenarios").then((r) => r.json()).then(setItems).catch(() => undefined); }, []);
+  if (!items.length) return null;
+  return (
+    <Section title="Try these">
+      <Flex direction="column" gap="8px">
+        {items.map((sc) => (
+          <Box key={sc.id}>
+            <button className="link" style={{ textAlign: "left", fontSize: 14 }} onClick={() => setOpen(open === sc.id ? null : sc.id)}>{sc.title}</button>
+            {open === sc.id && (
+              <Box mt="6px" pl="10px" borderLeft="2px solid var(--line)">
+                <Text fontSize="12.5px" color="var(--muted)" mb="6px">{sc.shows}</Text>
+                <Flex wrap="wrap" gap="6px">
+                  {sc.say.map((line, i) => (
+                    <button key={i} className="ctl sm" onClick={() => call.sendText(line)} title="Send this line">{i + 1}. {line.length > 38 ? line.slice(0, 36) + "…" : line}</button>
+                  ))}
+                </Flex>
+              </Box>
+            )}
+          </Box>
+        ))}
+      </Flex>
+      <Text mt="10px" fontSize="12px" color="var(--muted)">Send the lines in order. The first health line starts the conversation, the rest answer her questions.</Text>
+    </Section>
+  );
+}
+
 export function DetailsDrawer() {
   const open = useStore((s) => s.drawer);
   const sfxOn = useStore((s) => s.sfx);
@@ -152,6 +185,7 @@ export function DetailsDrawer() {
               <button className="ctl round" style={{ width: 36, height: 36, fontSize: 16 }} aria-label="Close details" onClick={() => useStore.getState().set({ drawer: false })}><FiX /></button>
             </Flex>
           </Flex>
+          <ScenariosSection />
           <SafetySection />
           <PipelineSection />
           <LatencySection />

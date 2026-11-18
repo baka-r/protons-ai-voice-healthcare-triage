@@ -36,7 +36,7 @@ _RAW: list[tuple[str, str, str]] = [
     # ---------------- diabetic ----------------
     ("diabetic", "emergency", r"(sugar|glucose).{0,20}(very low|dangerously|too low|too high)|diabetic.{0,20}(unconscious|confused|collapse\w*)"),
     # ---------------- severe pain / generic distress ----------------
-    ("severe_pain", "emergency", r"severe pain|unbearable pain|excruciating|worst pain|can'?t (take|bear|stand) (the|this) pain"),
+    ("severe_pain", "emergency", r"severe pain|unbearable pain|excruciating|worst pain|can'?t (take|bear|stand) (the|this|that) pain|pain (is|was|feels|has become) (so |really |absolutely |just |getting )?(unbearable|excruciating|killing me|agonising|agonizing)"),
     ("generic", "emergency", r"\bambulance\b|\bdying\b|going to die|life.?threatening|call (an )?(ambulance|911|1122|115)|need help (now|urgently|immediately|right now)|\b(somebody|someone|anybody|anyone) (please )?help\b|please help me$|^help me$|^help$|\bit'?s an emergency\b|\bthis is an emergency\b|\bmedical emergency\b|\bhave an emergency\b|\bthere'?s an emergency\b|^(an )?emergency$|\bemergency (hai|hogayi|ho gayi|hogai|hogaya|ho gaya)\b"),
     # ---------------- self harm ----------------
     ("self_harm", "self_harm", r"suicid\w*|kill (myself|my self)|end(ing)? (my|this) life|want to die|wanna die|don'?t want to (live|be alive)|hurt(ing)? myself|harm(ing)? myself|self.?harm|better off (dead|without me)|no reason to live|take my own life"),

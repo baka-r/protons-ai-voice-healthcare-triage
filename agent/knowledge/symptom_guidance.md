@@ -42,3 +42,30 @@ Press on it with a clean cloth to stop the bleeding, then wash it gently with cl
 
 ## I have a skin rash. What should I do?
 Avoid scratching, keep the area clean and dry, and stay away from anything that seems to make it worse. Get urgent help if the rash comes with trouble breathing, swelling of the face or mouth, or a high fever. Please see a doctor if it spreads or lasts more than a few days.
+
+## I have back pain. What should I do?
+Keep moving gently rather than staying in bed, avoid heavy lifting, and use a warm pack on the sore area for short periods. Get urgent help if you have weakness or numbness in a leg, trouble passing urine or stool, a fever, or if it began after a fall or accident. Please see a doctor if it lasts more than two weeks.
+
+## I have joint or muscle pain. What should I do?
+Rest the area, avoid the movement that hurts, and hold something cold wrapped in a cloth against it for short periods. Get urgent help if you cannot put weight on it, it looks bent, or it is numb, or if the joint is hot, red and swollen with a fever. Please see a doctor if it is not improving after a week.
+
+## I have ear pain. What should I do?
+Keep the ear dry and avoid putting anything inside it. Rest, and hold a warm cloth against the outside of the ear. Get urgent help if there is swelling behind the ear, a stiff neck, or sudden hearing loss with dizziness. Please see a doctor if there is a discharge, a fever, or the pain lasts more than three days.
+
+## I have a toothache. What should I do?
+Rinse your mouth gently with warm salted water, avoid very hot, cold or sweet food, and keep the area clean. Get urgent help if your face or jaw is swelling, you have trouble swallowing, or you have a fever. Please see a dentist or doctor if the pain lasts more than two days.
+
+## My eye is red and irritated. What should I do?
+Wash your hands, avoid rubbing the eye, and rinse it gently with clean water. Do not wear contact lenses until it settles. Get urgent help if you lose vision, see flashing lights, have severe pain, or something hit the eye or splashed into it. Please see a doctor if there is sticky discharge or it is not better in two days.
+
+## I have a burning feeling when I pass urine. What should I do?
+Drink plenty of water and do not hold urine in. Get urgent help if you have a fever with back or side pain, blood in the urine, or you cannot pass urine. Please see a doctor soon, because a urine infection usually needs to be checked and treated by a doctor.
+
+## I am constipated. What should I do?
+Drink more water, eat more fibre such as fruit, vegetables and whole grains, and try a short walk each day. Get urgent help if there is blood in the stool, severe belly pain, or vomiting with no stool or gas passing. Please see a doctor if it lasts more than a week.
+
+## I can't sleep. What should I do?
+Keep a regular bedtime, avoid tea, coffee and screens late in the day, and keep the room dark and quiet. Talking to someone you trust can help if you are worried. If you feel hopeless or have thoughts of harming yourself, please tell someone or call for help straight away. Please see a doctor if poor sleep goes on for more than two weeks.
+
+## I feel very tired and weak. What should I do?
+Rest, drink water, and eat regular meals. Try to keep a steady sleep routine. Get urgent help if the tiredness comes with chest pain, shortness of breath, fainting, or sudden weakness on one side. Please see a doctor if it lasts more than two weeks or you are losing weight without trying.

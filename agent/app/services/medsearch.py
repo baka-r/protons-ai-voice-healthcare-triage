@@ -29,13 +29,19 @@ def clean(text: str, limit: int = 700) -> str:
     return _WS.sub(" ", t).strip()[:limit]
 
 
+_NOISE = {"days", "day", "two", "three", "four", "five", "six", "seven", "week", "weeks", "month", "months", "year", "years", "old", "since",
+          "morning", "night", "today", "yesterday", "feeling", "feel", "like", "having", "been", "really", "very", "bit", "little", "much", "lot",
+          "also", "still", "again", "sometimes", "mostly", "mild", "bad", "severe"}
+
+
 def build_query(*texts: str, label: str | None = None) -> str:
     words: list[str] = []
     for t in texts:
         for w in re.findall(r"[a-zA-Z']+", t.lower()):
             if w not in _STOP and len(w) > 2 and w not in words:
                 words.append(w)
-    q = " ".join(words[:7])
+    words = [w for w in words if w not in _NOISE]  # durations / ages / filler words pull in unrelated conditions
+    q = " ".join(words[: 3 if label else 5])  # a recognised topic label already says what it is about
     if label and label not in q:
         q = f"{label} {q}".strip()
     return f"{q} symptoms causes".strip()

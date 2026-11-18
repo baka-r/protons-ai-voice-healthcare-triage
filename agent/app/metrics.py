@@ -32,6 +32,27 @@ class Metrics:
                 if ms <= b:
                     h["b"][i] += 1
 
+    def summary(self) -> dict:
+        """Plain numbers for the owner dashboard: counters and, per histogram, count / average / approximate p50 and p95 (ms)."""
+        with self._lock:
+            counters: dict[str, float] = defaultdict(float)
+            for (name, _labels), v in self.counters.items():
+                counters[name] += v
+            lat = {}
+            for name, h in self.hist.items():
+                n = h["count"]
+                if not n:
+                    continue
+
+                def q(p: float) -> int:
+                    for b, c in zip(_BUCKETS, h["b"]):
+                        if c >= p * n:
+                            return b
+                    return _BUCKETS[-1] * 2
+
+                lat[name] = {"count": n, "avg_ms": round(h["sum"] / n), "p50_ms": q(0.5), "p95_ms": q(0.95)}
+            return {"counters": dict(counters), "latency": lat}
+
     def render(self) -> str:
         out: list[str] = []
         with self._lock:

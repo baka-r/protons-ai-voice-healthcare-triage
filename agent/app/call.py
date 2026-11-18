@@ -27,7 +27,7 @@ from app.metrics import metrics
 from app.services.lang import Localizer
 from app.services.stt import STT, STTResult, script_of
 from app.safety.text import normalize
-from app.dialog import rules
+from app.dialog import rules, triage
 from app.services.tts import PAUSE_LINE_MS, SAMPLE_RATE, TTS, pause_ms, silence, split_sentences
 
 log = logging.getLogger("call")
@@ -66,6 +66,8 @@ class CallSession:
         self.closed = False
         self.stt_failures = 0
         self._timing: dict[str, Any] | None = None
+        self._brief: dict[str, Any] | None = None  # triage brief of the reply being delivered (given to staff on a hand-over)
+        self._feedback_count = 0
 
     # ------------------------------------------------------------------ plumbing
     async def send(self, obj: dict) -> None:
@@ -112,13 +114,15 @@ class CallSession:
         self.s.history.append({"role": role, "text": text, "ts": time.time()})
 
     # ------------------------------------------------------------------ lifecycle
-    async def start(self, lang: str = "en") -> None:
+    async def start(self, lang: str = "en", role: str = "patient", consent: bool = False) -> None:
         d, s = self.d, self.s
         if lang in ("hi", "ur"):
             s.language = lang
             await self.send({"type": "language", "lang": lang})
+        s.role = role if role in ("patient", "owner", "doctor", "qa") else "patient"
         d.hub.calls[s.id] = self
         d.store.fire(d.store.create_session, s.id)
+        d.store.fire(d.store.add_session_info, s.id, s.role, consent)
         d.store.fire(d.store.audit, "system", "call_started", {"session": s.id})
         await self.send({
             "type": "session", "id": s.id, "hospital": d.settings.hospital_name,
@@ -505,6 +509,13 @@ class CallSession:
             await self.send({"type": "sources", "items": reply.sources})
         if reply.intent:
             await self.send({"type": "intent", "intent": reply.intent})
+        if reply.triage and reply.triage.get("tier"):
+            b = reply.triage
+            await self.send({"type": "triage", "tier": b["tier"], "label": b.get("tier_label", ""), "topic": b.get("topic", ""),
+                             "age_group": b.get("age_group", "unknown"), "reasons": b.get("reasons", [])})
+            d.store.fire(d.store.add_triage, s.id, b)
+            metrics.inc("triage_tier", tier=b["tier"])
+        self._brief = reply.triage
         for line in reply.lines:
             self._remember("assistant", line.text)
         spoken = " ".join(x.text for x in reply.lines)[:2000]
@@ -585,6 +596,7 @@ class CallSession:
         metrics.inc("handovers_total", reason=req.reason, urgency=req.urgency)
         h = d.hub.create_handover(s.id, req.reason, req.urgency, req.category, req.source, s.history)
         s.handover_id = h["id"]
+        h["brief"] = self._brief or triage.brief(s, {"emergency": "emergency", "urgent": "same_day"}.get(req.urgency), [req.reason.replace("_", " ")])
         d.store.fire(d.store.create_escalation, h["id"], s.id, req.reason, req.urgency, req.category, req.source)
         d.store.fire(d.store.audit, "system", "handover_created",
                      {"session": s.id, "handover": h["id"], "reason": req.reason, "urgency": req.urgency, "category": req.category, "source": req.source})
@@ -601,7 +613,7 @@ class CallSession:
                 "caller_request": "", "urgency": h["urgency"], "notes_for_staff": "",
             }
         h["summary"] = summary
-        d.store.fire(d.store.update_escalation, h["id"], summary=summary)
+        d.store.fire(d.store.update_escalation, h["id"], summary={**summary, "brief": h.get("brief")})
         await d.hub.broadcast_staff({"type": "handover_updated", "handover": d.hub.public(h)})
 
     async def _hold(self, urgency: str) -> None:
@@ -624,6 +636,18 @@ class CallSession:
         await self.send({"type": "handover", "status": "connected", "staff": staff_name, "id": self.s.handover_id})
         await self.state("connected")
         self._spawn(self._speak([Line(text=scripts.fixed("connected"), key="connected")]))
+
+    async def feedback(self, rating: str, comment: str = "", answer: str = "") -> None:
+        """Thumbs up/down from the person testing, tied to the answer they were reacting to (identifiers masked, capped per call)."""
+        if rating not in ("up", "down") or self._feedback_count >= 40:
+            return
+        self._feedback_count += 1
+        s = self.s
+        last_a = next((h["text"] for h in reversed(s.history) if h["role"] == "assistant"), "")
+        last_c = next((h["text"] for h in reversed(s.history) if h["role"] == "caller"), "")
+        self.d.store.fire(self.d.store.add_feedback, s.id, rating, self._mask(comment[:600]), last_c,
+                          self._mask(answer[:900]) if answer else last_a, s.role, s.language)
+        metrics.inc("feedback", rating=rating)
 
     async def request_human(self) -> None:
         if self.s.ended or self.mode in ("handover", "emergency", "connected"):

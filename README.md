@@ -63,10 +63,19 @@ Browser (React + Chakra + Motion, Silero VAD in-browser) --WebSocket--> nginx --
 
 ## Evidence (from this repo)
 
-* 218 unit tests; a ~1,200-case synthetic safety regression (emergency/distress/abuse recall 100%, 0 leaks, 0 false escalations, 12/12 multi-turn scenarios).
+* 334 unit tests; a ~1,200-case synthetic safety regression (emergency/distress/abuse recall 100%, 0 leaks, 0 false escalations, 12/12 multi-turn scenarios).
 * Live e2e suite (security, persona, doctor mode, booking, concurrency, audit) and a latency benchmark: rule-answered turns ~10–80 ms server time,
   voice turns ~300–900 ms from end of speech to first audio (excludes the ~380 ms end-of-speech wait in the browser).
 * These are regression/engineering evidence, **not** clinical validation.
+
+## Testing with patients, QA, doctors and the owner
+
+* [docs/PILOT_PLAN.md](docs/PILOT_PLAN.md): roles, consent, weekly rhythm, stop rule, success measures (written for Pakistan).
+* [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md): a 10-minute script; the same scenarios are clickable inside the app (Details → "Try these").
+* [docs/CLINICAL_REVIEW.md](docs/CLINICAL_REVIEW.md): the checklist doctors sign before real patients use it.
+* `/staff`: hand-overs (with a clinical brief), **Doctor review** (mark answers safe / wrong / unsafe, export corrections as test cases),
+  **Owner** dashboard (calls, urgency mix, feedback, speed, AI health) and **Accounts** (per-person logins; the owner is `owner`).
+* `docker compose exec agent python -m app.triage_eval`: safety gates (emergency recall 100%, no under-triage, medicine requests blocked).
 
 ## Operate
 
@@ -76,6 +85,8 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): production overlay, shared-proxy o
 docker run --rm protons-triage-agent python -m pytest -q          # after: docker compose build agent
 docker compose exec -T agent python - < scripts/e2e_live.py        # live end-to-end
 docker compose exec -T agent python - < scripts/bench_latency.py   # latency
+docker compose exec -T agent python - < scripts/e2e_clinic.py      # accounts, roles, tiers, feedback, doctor review, owner stats
+docker compose exec -T agent python - < scripts/bench_gaps.py      # audible gaps in streamed speech
 docker compose exec agent python -m app.seed_db                    # seed synthetic data
 ```
 

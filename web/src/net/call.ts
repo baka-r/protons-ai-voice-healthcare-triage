@@ -53,7 +53,8 @@ export class CallClient {
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "start", lang: useStore.getState().lang }));
+      const g = useStore.getState();
+      ws.send(JSON.stringify({ type: "start", lang: g.lang, role: g.tester, consent: g.consent }));
       useStore.getState().set({ phase: "live" });
       void this.startMic();
     };
@@ -144,6 +145,11 @@ export class CallClient {
     this.send({ type: "set_language", lang });
   }
 
+  sendFeedback(captionId: number, rating: "up" | "down", text: string, comment = "") {
+    useStore.getState().set({ rated: { ...useStore.getState().rated, [captionId]: rating } });
+    this.send({ type: "feedback", rating, text, comment });
+  }
+
   requestHuman() {
     this.player?.stop();
     this.send({ type: "request_human" });
@@ -205,6 +211,9 @@ export class CallClient {
         break;
       case "timing":
         st.set({ timing: { ...st.timing, ...m } });
+        break;
+      case "triage":
+        st.set({ triage: { tier: m.tier, label: m.label, topic: m.topic, age_group: m.age_group, reasons: m.reasons ?? [] } });
         break;
       case "language":
         st.set({ lang: m.lang });

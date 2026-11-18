@@ -17,7 +17,8 @@ from app.hub import Hub
 from app.logging_setup import setup_logging
 from app.metrics import metrics
 from app.safety import scripts
-from app.security import SlidingWindow, Tokens, check_production_config, client_ip, origin_allowed, pin_ok, require_staff
+from app.api_clinic import router as clinic_router
+from app.security import SlidingWindow, Tokens, check_production_config, client_ip, origin_allowed, pin_ok, require_staff, subject
 from app.services.emr import EMR
 from app.services.llm import LLM
 from app.services.rag import RAG
@@ -47,6 +48,19 @@ async def lifespan(app: FastAPI):
     tokens = Tokens(s.secret_key, s.staff_token_ttl_s)
     store = Store(s.database_url)
     await asyncio.to_thread(store.init)
+    if store.ok:
+        await asyncio.to_thread(store.bootstrap_accounts, s.owner_password or s.staff_pin)
+
+    async def retention() -> None:
+        """Nightly: delete masked transcripts and feedback text older than RETENTION_DAYS (verdicts and counts are kept)."""
+        while True:
+            try:
+                if store.ok:
+                    r = await asyncio.to_thread(store.purge_old, s.retention_days)
+                    log.info("retention purge (%d days): %s", s.retention_days, r)
+            except Exception:
+                log.exception("retention purge failed")
+            await asyncio.sleep(6 * 3600)
     llm, stt, tts, emr, rag = LLM(s), STT(s), TTS(s), EMR(s), RAG(s)
     verify_limiter = SlidingWindow(8, 3600)  # 8 failed identity checks / hour / IP
     from app.services.doctor import Doctor
@@ -79,7 +93,9 @@ async def lifespan(app: FastAPI):
             depts = [d["name"] for d in await emr.departments()]
         except Exception:
             return
-        vocab = phrase_vocab(depts)
+        from app.dialog import triage as _tri
+
+        vocab = phrase_vocab(depts) + [_tri.tier_line(t) for t in ("self_care", "see_doctor_soon", "same_day")]
         done = 0
         for text in vocab:
             if tts.cached(text) is None:
@@ -114,6 +130,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(stt.warm()),
         asyncio.create_task(init_rag()),
         asyncio.create_task(warm_dateparser()),
+        asyncio.create_task(retention()),
     ]
     log.info("agent up: env=%s llm_routes=%d stt_routes=%d voice=%s", s.app_env, len(llm.routes), len(stt.routes), s.tts_voice)
     yield
@@ -122,6 +139,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Hania voice assistant", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app.include_router(clinic_router)
 
 
 @app.middleware("http")
@@ -151,7 +169,7 @@ async def ready(response: Response):
 async def status():
     """Booleans only - drives the start screen. No models, keys, errors or provider names."""
     return {
-        "llm": deps.llm.enabled, "stt": deps.stt.enabled, "voice": await deps.tts.healthy(), "voice_cache": deps.tts.ready,
+        "llm": deps.llm.enabled, "llm_busy": deps.llm.busy, "stt": deps.stt.enabled, "voice": await deps.tts.healthy(), "voice_cache": deps.tts.ready,
         "records": await deps.emr.healthy(), "knowledge": deps.rag.ready, "db": deps.store.ok,
     }
 
@@ -171,15 +189,27 @@ async def staff_login(request: Request):
     try:
         body = await request.json()
         pin = str(body.get("pin", ""))[:128]
+        username = str(body.get("username", ""))[:40]
+        password = str(body.get("password", ""))[:128]
     except Exception:
         raise HTTPException(400, "bad request")
-    if not pin_ok(pin, get_settings().staff_pin):
+    ttl = get_settings().staff_token_ttl_s
+    if username:  # named account (owner / doctor / support person)
+        acct = await asyncio.to_thread(deps.store.login_account, username, password) if deps.store.ok else None
+        if not acct:
+            login_failures.add(ip)
+            metrics.inc("staff_login_failed")
+            deps.store.fire(deps.store.audit, "staff", "staff_login_failed", {"ip": ip, "username": username[:40]})
+            raise HTTPException(401, "wrong username or password")
+        deps.store.fire(deps.store.audit, acct["username"], "staff_login", {"ip": ip, "role": acct["role"]})
+        return {"token": tokens.issue(subject(acct["username"], acct["role"], acct["name"])), "ttl": ttl, "role": acct["role"], "name": acct["name"]}
+    if not pin_ok(pin, get_settings().staff_pin):  # the shared PIN stays as the simple hand-over desk login (support role only)
         login_failures.add(ip)
         metrics.inc("staff_login_failed")
         deps.store.fire(deps.store.audit, "staff", "staff_login_failed", {"ip": ip})
         raise HTTPException(401, "wrong PIN")
-    deps.store.fire(deps.store.audit, "staff", "staff_login", {"ip": ip})
-    return {"token": tokens.issue("staff-demo"), "ttl": get_settings().staff_token_ttl_s}
+    deps.store.fire(deps.store.audit, "staff", "staff_login", {"ip": ip, "role": "support"})
+    return {"token": tokens.issue(subject("staff-demo", "support", "Demo Support Agent")), "ttl": ttl, "role": "support", "name": "Demo Support Agent"}
 
 
 def _staff(request: Request) -> str:
@@ -353,7 +383,9 @@ async def ws_call(ws: WebSocket):
                 except Exception:
                     continue
                 if kind == "start":
-                    spawn(call.start(str(data.get("lang", "en"))[:2]))
+                    spawn(call.start(str(data.get("lang", "en"))[:2], str(data.get("role", "patient"))[:12], bool(data.get("consent"))))
+                elif kind == "feedback":
+                    spawn(call.feedback(str(data.get("rating", ""))[:4], str(data.get("comment", ""))[:600], str(data.get("text", ""))[:900]))
                 elif kind == "set_language":
                     spawn(call.set_language(str(data.get("lang", "en"))[:2]))
                 elif kind == "text":

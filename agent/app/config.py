@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # Doctor-style conversation (follow-up questions + medical reference lookup + possible explanations). Needs a working LLM route.
     doctor_mode: bool = True
     tz: str = "Asia/Karachi"
+    # Transcripts (masked) and feedback text older than this are deleted nightly. Review verdicts and aggregate counts are kept.
+    retention_days: int = 30
+    # First start only: the account the owner signs in with (username "owner", role admin). Defaults to STAFF_PIN.
+    owner_password: str = ""
 
     @property
     def groq_keys(self) -> list[str]:

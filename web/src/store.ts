@@ -10,8 +10,10 @@ export interface Caption { id: number; role: "caller" | "assistant"; text: strin
 export interface TraceItem { id: number; step: string; status: StepStatus; detail: string; t: number }
 export interface Timing { stt_ms?: number | null; nlu_ms?: number | null; tts_first_ms?: number | null; server_ms?: number | null; e2e_ms?: number | null }
 export interface Source { title: string; version: number; score: number; chunk_id: string }
+export type Tester = "patient" | "qa" | "doctor" | "owner";
+export interface Triage { tier: "self_care" | "see_doctor_soon" | "same_day" | "emergency"; label: string; topic: string; age_group: string; reasons: string[] }
 export interface Status {
-  llm: boolean; stt: boolean; voice: boolean; voice_cache: boolean; records: boolean; knowledge: boolean; db: boolean;
+  llm: boolean; llm_busy?: boolean; stt: boolean; voice: boolean; voice_cache: boolean; records: boolean; knowledge: boolean; db: boolean;
 }
 
 interface S {
@@ -22,6 +24,10 @@ interface S {
   muted: boolean;
   sfx: boolean;
   lang: Lang;
+  tester: Tester;
+  consent: boolean;
+  triage: Triage | null;
+  rated: Record<number, "up" | "down">;
   micError: string | null;
   error: string | null;
   captions: Caption[];
@@ -43,19 +49,24 @@ interface S {
 }
 
 let seq = 1;
+function readTester(): Tester {
+  try { const v = localStorage.getItem("hania_tester"); return v === "qa" || v === "doctor" || v === "owner" ? v : "patient"; } catch { return "patient"; }
+}
 function readLang(): Lang {
   try { const v = localStorage.getItem("hania_lang"); return v === "hi" || v === "ur" ? v : "en"; } catch { return "en"; }
 }
 const initial = {
   phase: "boot" as Phase, ui: "idle" as UiState, mode: "normal" as Mode, playing: false, muted: false, sfx: true, lang: "en" as Lang,
   micError: null, error: null, captions: [], trace: [], steps: {}, safety: { redflag: "ok", scope: "ok", pii: "on", llm_check: "ok" },
-  sources: [], timing: {}, intent: null, session: null, handover: null,
+  sources: [], timing: {}, intent: null, session: null, handover: null, triage: null as Triage | null, rated: {} as Record<number, "up" | "down">,
 };
 
 export const useStore = create<S>((set) => ({
   ...initial,
   status: null,
   lang: readLang(),
+  tester: readTester(),
+  consent: false,
   drawer: false,
   set: (p) => set(p),
   addCaption: (c) => set((s) => ({ captions: [...s.captions.slice(-40), { ...c, id: seq++ }] })),
@@ -65,5 +76,5 @@ export const useStore = create<S>((set) => ({
       steps: { ...s.steps, [t.step]: { status: t.status, detail: t.detail } },
     })),
   resetTurn: () => set({ steps: {}, sources: [] }),
-  reset: () => set((s) => ({ ...initial, lang: s.lang })),
+  reset: () => set((s) => ({ ...initial, lang: s.lang, tester: s.tester, consent: s.consent })),
 }));

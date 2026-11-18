@@ -15,7 +15,9 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, select
+from datetime import timedelta
+
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, delete, func, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session as DB, mapped_column
 
 log = logging.getLogger("db")
@@ -196,6 +198,69 @@ class EvalRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     mode: Mapped[str] = mapped_column(String(16))
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class StaffAccount(Base):
+    """A named person who can sign in to the staff site (role: support | clinician | admin). Passwords are scrypt-hashed."""
+    __tablename__ = "staff_account"
+    username: Mapped[str] = mapped_column(String(40), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(80))
+    role: Mapped[str] = mapped_column(String(16))
+    pw_hash: Mapped[str] = mapped_column(String(200))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SessionInfo(Base):
+    """Who is testing (patient / owner / doctor) and the consent they gave on the start screen."""
+    __tablename__ = "session_info"
+    session_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    role: Mapped[str] = mapped_column(String(12), default="patient")
+    consent: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class TriageResult(Base):
+    """The urgency tier suggested for a call (NOT a diagnosis) with the de-identified brief that was given to staff."""
+    __tablename__ = "triage_result"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), index=True)
+    topic: Mapped[str] = mapped_column(String(80), default="")
+    tier: Mapped[str] = mapped_column(String(20))
+    age_group: Mapped[str] = mapped_column(String(16), default="unknown")
+    source: Mapped[str] = mapped_column(String(16), default="")  # interview | doctor_mode | rules | llm
+    brief: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Feedback(Base):
+    """Thumbs up/down (+ optional comment) from whoever is testing, tied to the answer they were reacting to."""
+    __tablename__ = "feedback"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), index=True)
+    rating: Mapped[str] = mapped_column(String(8))  # up | down
+    comment: Mapped[str] = mapped_column(Text, default="")
+    caller_text: Mapped[str] = mapped_column(Text, default="")
+    assistant_text: Mapped[str] = mapped_column(Text, default="")
+    role: Mapped[str] = mapped_column(String(12), default="patient")
+    lang: Mapped[str] = mapped_column(String(8), default="en")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Review(Base):
+    """A clinician's verdict on one thing Hania said. unsafe / wrong rows (with the correction) become new test cases."""
+    __tablename__ = "review"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), index=True)
+    utterance_id: Mapped[int] = mapped_column(Integer)
+    verdict: Mapped[str] = mapped_column(String(12))  # safe | unsafe | wrong
+    correction: Mapped[str] = mapped_column(Text, default="")
+    expected_tier: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    caller_text: Mapped[str] = mapped_column(Text, default="")
+    assistant_text: Mapped[str] = mapped_column(Text, default="")
+    reviewer: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 def chain_hash(prev: str, ts: str, actor: str, action: str, payload: dict) -> str:
@@ -407,3 +472,187 @@ class Store:
             rows = db.scalars(select(Escalation).order_by(Escalation.created_at.desc()).limit(limit)).all()
             return [{"id": r.escalation_id, "session_id": r.session_id, "reason": r.reason, "urgency": r.urgency, "status": r.status,
                      "created_at": r.created_at.isoformat()} for r in rows]
+
+    # -------------------------------------------------------------- staff accounts
+    def bootstrap_accounts(self, owner_password: str) -> None:
+        """First start only: create the owner (admin) account so someone can sign in and create the doctors."""
+        from app.security import hash_password
+
+        with DB(self.engine) as db:
+            if db.scalar(select(StaffAccount).limit(1)):
+                return
+            db.add(StaffAccount(username="owner", display_name="Owner", role="admin", pw_hash=hash_password(owner_password)))
+            db.commit()
+
+    def login_account(self, username: str, password: str) -> dict | None:
+        from app.security import check_password
+
+        with DB(self.engine) as db:
+            a = db.get(StaffAccount, username.strip().lower()[:40])
+            ok = bool(a and a.active and check_password(password, a.pw_hash))
+            if not ok:
+                check_password(password, "scrypt$00$00")  # keep timing similar for unknown users
+                return None
+            a.last_login = _now()
+            db.commit()
+            return {"username": a.username, "name": a.display_name, "role": a.role}
+
+    def list_accounts(self) -> list[dict]:
+        with DB(self.engine) as db:
+            return [{"username": a.username, "name": a.display_name, "role": a.role, "active": a.active,
+                     "last_login": a.last_login.isoformat() if a.last_login else None} for a in db.scalars(select(StaffAccount).order_by(StaffAccount.created_at))]
+
+    def create_account(self, username: str, name: str, role: str, password: str) -> bool:
+        from app.security import hash_password
+
+        username = username.strip().lower()[:40]
+        with DB(self.engine) as db:
+            if db.get(StaffAccount, username):
+                return False
+            db.add(StaffAccount(username=username, display_name=name.strip()[:80] or username, role=role, pw_hash=hash_password(password)))
+            db.commit()
+            return True
+
+    def set_account(self, username: str, active: bool | None = None, password: str | None = None) -> bool:
+        from app.security import hash_password
+
+        with DB(self.engine) as db:
+            a = db.get(StaffAccount, username.strip().lower())
+            if not a:
+                return False
+            if active is not None:
+                a.active = active
+            if password:
+                a.pw_hash = hash_password(password)
+            db.commit()
+            return True
+
+    # -------------------------------------------------------------- consent, triage, feedback
+    def add_session_info(self, session_id: str, role: str, consent: bool) -> None:
+        with DB(self.engine) as db:
+            db.merge(SessionInfo(session_id=session_id, role=role if role in ("patient", "owner", "doctor", "qa") else "patient", consent=consent))
+            db.commit()
+
+    def add_triage(self, session_id: str, brief: dict) -> None:
+        with DB(self.engine) as db:
+            db.add(TriageResult(session_id=session_id, topic=str(brief.get("topic", ""))[:80], tier=str(brief.get("tier") or "see_doctor_soon"),
+                                age_group=str(brief.get("age_group", "unknown")), source=str(brief.get("source", ""))[:16], brief=brief))
+            db.commit()
+
+    def add_feedback(self, session_id: str, rating: str, comment: str, caller_text: str, assistant_text: str, role: str, lang: str) -> None:
+        with DB(self.engine) as db:
+            db.add(Feedback(session_id=session_id, rating=rating, comment=comment[:1000], caller_text=caller_text[:600],
+                            assistant_text=assistant_text[:900], role=role, lang=lang[:8]))
+            db.commit()
+
+    # -------------------------------------------------------------- doctor review
+    def review_sessions(self, limit: int = 60, only_flagged: bool = False) -> list[dict]:
+        with DB(self.engine) as db:
+            rows = db.scalars(select(CallSession).order_by(CallSession.started_at.desc()).limit(limit * 3 if only_flagged else limit)).all()
+            out = []
+            for r in rows:
+                sid = r.session_id
+                said = db.scalar(select(func.count()).select_from(Utterance).where(Utterance.session_id == sid)) or 0
+                if not said:
+                    continue  # purged by retention, or nothing happened
+                tri = db.scalar(select(TriageResult).where(TriageResult.session_id == sid).order_by(TriageResult.id.desc()).limit(1))
+                down = db.scalar(select(func.count()).select_from(Feedback).where(Feedback.session_id == sid, Feedback.rating == "down")) or 0
+                up = db.scalar(select(func.count()).select_from(Feedback).where(Feedback.session_id == sid, Feedback.rating == "up")) or 0
+                reviewed = db.scalar(select(func.count()).select_from(Review).where(Review.session_id == sid)) or 0
+                info = db.get(SessionInfo, sid)
+                if only_flagged and not (down or (tri and tri.tier in ("same_day", "emergency")) or r.outcome == "handover"):
+                    continue
+                out.append({"session_id": sid, "started_at": r.started_at.isoformat(), "language": r.language, "outcome": r.outcome,
+                            "turns": r.turns, "tier": tri.tier if tri else None, "topic": tri.topic if tri else "", "thumbs_up": up,
+                            "thumbs_down": down, "reviewed": reviewed, "role": info.role if info else "patient"})
+                if len(out) >= limit:
+                    break
+            return out
+
+    def review_session(self, session_id: str) -> dict | None:
+        with DB(self.engine) as db:
+            cs = db.get(CallSession, session_id)
+            if not cs:
+                return None
+            uts = db.scalars(select(Utterance).where(Utterance.session_id == session_id).order_by(Utterance.utterance_id)).all()
+            reviews = db.scalars(select(Review).where(Review.session_id == session_id).order_by(Review.id)).all()
+            fb = db.scalars(select(Feedback).where(Feedback.session_id == session_id).order_by(Feedback.id)).all()
+            tri = db.scalars(select(TriageResult).where(TriageResult.session_id == session_id).order_by(TriageResult.id)).all()
+            return {
+                "session_id": session_id, "started_at": cs.started_at.isoformat(), "language": cs.language, "outcome": cs.outcome,
+                "utterances": [{"id": u.utterance_id, "speaker": u.speaker, "text": u.text, "intent": u.intent, "at": u.created_at.isoformat()} for u in uts],
+                "reviews": [{"id": v.id, "utterance_id": v.utterance_id, "verdict": v.verdict, "correction": v.correction, "expected_tier": v.expected_tier,
+                             "reviewer": v.reviewer, "at": v.created_at.isoformat()} for v in reviews],
+                "feedback": [{"rating": f.rating, "comment": f.comment, "assistant_text": f.assistant_text, "role": f.role} for f in fb],
+                "triage": [{"tier": t.tier, "topic": t.topic, "age_group": t.age_group, "source": t.source, "brief": t.brief} for t in tri],
+            }
+
+    def add_review(self, session_id: str, utterance_id: int, verdict: str, correction: str, expected_tier: str | None, reviewer: str) -> bool:
+        with DB(self.engine) as db:
+            u = db.get(Utterance, utterance_id)
+            if not u or u.session_id != session_id or u.speaker != "assistant":
+                return False
+            prev = db.scalar(select(Utterance).where(Utterance.session_id == session_id, Utterance.speaker == "caller",
+                                                    Utterance.utterance_id < utterance_id).order_by(Utterance.utterance_id.desc()).limit(1))
+            existing = db.scalar(select(Review).where(Review.utterance_id == utterance_id, Review.reviewer == reviewer))
+            row = existing or Review(session_id=session_id, utterance_id=utterance_id, reviewer=reviewer)
+            row.verdict, row.correction, row.expected_tier = verdict, correction[:2000], expected_tier
+            row.caller_text, row.assistant_text = (prev.text if prev else "")[:600], u.text[:900]
+            db.add(row)
+            db.commit()
+            return True
+
+    def export_corrections(self) -> list[dict]:
+        """Clinician verdicts as test cases: what the caller said, what Hania answered, what the doctor wants instead."""
+        with DB(self.engine) as db:
+            rows = db.scalars(select(Review).where(Review.verdict.in_(("unsafe", "wrong"))).order_by(Review.id)).all()
+            return [{"id": f"review-{r.id}", "caller_text": r.caller_text, "hania_said": r.assistant_text, "verdict": r.verdict,
+                     "doctor_correction": r.correction, "expected_tier": r.expected_tier, "reviewer": r.reviewer,
+                     "provenance": "clinician_review", "clinical_review": "SIGNED_BY_REVIEWER"} for r in rows]
+
+    # -------------------------------------------------------------- owner dashboard
+    def owner_stats(self, days: int = 7) -> dict:
+        since = _now() - timedelta(days=days)
+        with DB(self.engine) as db:
+            def grouped(col, *where):
+                q = select(col, func.count())
+                if where:
+                    q = q.where(*where)
+                return {str(k or "none"): n for k, n in db.execute(q.group_by(col)).all()}
+
+            calls = db.scalar(select(func.count()).select_from(CallSession).where(CallSession.started_at >= since)) or 0
+            avg_turns = db.scalar(select(func.avg(CallSession.turns)).where(CallSession.started_at >= since)) or 0
+            rec = db.scalars(select(Feedback).where(Feedback.created_at >= since, Feedback.comment != "").order_by(Feedback.id.desc()).limit(12)).all()
+            intents = db.execute(select(Utterance.intent, func.count()).where(
+                Utterance.created_at >= since, Utterance.speaker == "assistant", Utterance.intent.is_not(None)
+            ).group_by(Utterance.intent).order_by(func.count().desc()).limit(8)).all()
+            return {
+                "days": days, "calls": calls, "avg_turns": round(float(avg_turns), 1),
+                "outcomes": grouped(CallSession.outcome, CallSession.started_at >= since),
+                "languages": grouped(CallSession.language, CallSession.started_at >= since),
+                "handovers_by_urgency": grouped(Escalation.urgency, Escalation.created_at >= since),
+                "handover_status": grouped(Escalation.status, Escalation.created_at >= since),
+                "handover_reasons": grouped(Escalation.reason, Escalation.created_at >= since),
+                "tiers": grouped(TriageResult.tier, TriageResult.created_at >= since),
+                "tier_topics": grouped(TriageResult.topic, TriageResult.created_at >= since, TriageResult.topic != ""),
+                "testers": grouped(SessionInfo.role, SessionInfo.created_at >= since),
+                "feedback": grouped(Feedback.rating, Feedback.created_at >= since),
+                "recent_comments": [{"rating": f.rating, "comment": f.comment, "answer": f.assistant_text[:200], "role": f.role,
+                                     "at": f.created_at.isoformat()} for f in rec],
+                "reviews": grouped(Review.verdict, Review.created_at >= since),
+                "appointments": grouped(Appointment.status),
+                "top_intents": {str(k): n for k, n in intents},
+            }
+
+    # -------------------------------------------------------------- retention
+    def purge_old(self, days: int) -> dict:
+        """Delete masked transcripts and feedback text older than `days`. Verdicts, tiers and counts are kept."""
+        cutoff = _now() - timedelta(days=days)
+        with DB(self.engine) as db:
+            old = select(Utterance.utterance_id).where(Utterance.created_at < cutoff)
+            rs = db.execute(delete(ResponseSource).where(ResponseSource.utterance_id.in_(old))).rowcount
+            us = db.execute(delete(Utterance).where(Utterance.created_at < cutoff)).rowcount
+            fb = db.execute(update(Feedback).where(Feedback.created_at < cutoff).values(caller_text="", assistant_text="", comment="")).rowcount
+            rv = db.execute(update(Review).where(Review.created_at < cutoff).values(caller_text="", assistant_text="")).rowcount
+            db.commit()
+        return {"utterances": us, "sources": rs, "feedback_text": fb, "review_text": rv}

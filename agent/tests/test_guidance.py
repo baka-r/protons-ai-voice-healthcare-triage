@@ -82,7 +82,19 @@ async def test_guidance_mid_booking_resumes_the_flow():
     assert r.handover is None and s.state == "AWAIT_DEPT" and say_(r).endswith("Which department would you like to see?")
 
 
-async def test_llm_offline_symptoms_still_go_to_staff():
+async def test_llm_offline_common_complaint_uses_the_fixed_interview_not_staff():
+    """Free-tier AI keys run out: a COMMON complaint carries on with the fixed yes/no interview (rules + danger questions)."""
     eng = Engine(Settings(), FakeLLM(None), FakeEMR(), GuidanceRAG())
-    r = await eng.handle(Session(id="t"), "I'm feeling sick and vomiting, what should I do")
-    assert r.handover  # no AI safety net => no guidance
+    s = Session(id="t")
+    r = await eng.handle(s, "I'm feeling sick and vomiting, what should I do")
+    assert r.handover is None and s.state == "AWAIT_SYMPTOM_Q" and r.safety["llm_check"] == "offline"
+
+
+async def test_llm_offline_unknown_or_risky_symptoms_still_go_to_staff():
+    eng = Engine(Settings(), FakeLLM(None), FakeEMR(), GuidanceRAG())
+    r = await eng.handle(Session(id="t"), "I found a lump on my neck, what should I do")  # no known interview for this
+    assert r.handover
+    r = await eng.handle(Session(id="t"), "my baby is vomiting")  # children always go to a person
+    assert r.handover
+    r = await eng.handle(Session(id="t"), "what tablet should I take for my vomiting")  # medicines never
+    assert r.handover

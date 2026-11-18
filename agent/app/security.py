@@ -58,6 +58,38 @@ def pin_ok(given: str, real: str) -> bool:
     return hmac.compare_digest(hashlib.sha256(given.encode()).digest(), hashlib.sha256(real.encode()).digest())
 
 
+# ---------------------------------------------------------------- per-person staff accounts
+ROLES = ("support", "clinician", "admin")  # support: hand-overs | clinician: + doctor review | admin: + owner dashboard, accounts, demo reset
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    dk = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return f"scrypt${salt.hex()}${dk.hex()}"
+
+
+def check_password(password: str, stored: str) -> bool:
+    try:
+        scheme, salt_hex, dk_hex = stored.split("$")
+        if scheme != "scrypt":
+            return False
+        dk = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt_hex), n=2**14, r=8, p=1, dklen=32)
+        return hmac.compare_digest(dk.hex(), dk_hex)
+    except Exception:
+        return False
+
+
+def subject(username: str, role: str, name: str) -> str:
+    return "|".join(x.replace("|", "/") for x in (username, role, name))
+
+
+def claims_of(sub: str) -> dict:
+    parts = (sub or "").split("|")
+    if len(parts) == 3:
+        return {"user": parts[0], "role": parts[1] if parts[1] in ROLES else "support", "name": parts[2]}
+    return {"user": sub or "staff", "role": "support", "name": sub or "Staff"}  # tokens issued before accounts existed
+
+
 class SlidingWindow:
     """N events per window per key. Memory-bounded (old keys are purged)."""
 
@@ -130,3 +162,11 @@ def require_staff(request: Request, tokens: Tokens) -> str:
     if not sub:
         raise HTTPException(status_code=401, detail="authentication required")
     return sub
+
+
+def require_role(request: Request, tokens: Tokens, *allowed: str) -> dict:
+    """Signed-in staff member whose role is one of `allowed` (admin is always allowed). Returns {user, role, name}."""
+    who = claims_of(require_staff(request, tokens))
+    if who["role"] != "admin" and who["role"] not in allowed:
+        raise HTTPException(status_code=403, detail="your role cannot do this")
+    return who

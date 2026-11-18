@@ -2,7 +2,9 @@ import { Box, Text } from "@chakra-ui/react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect } from "react";
 import { call } from "../net/call";
-import { useStore, type Status } from "../store";
+import { useStore, type Status, type Tester } from "../store";
+
+const TESTERS: [Tester, string][] = [["patient", "Patient"], ["qa", "QA tester"], ["doctor", "Doctor"], ["owner", "Owner"]];
 
 /** Shown under the idle orb before a call begins. */
 export function StartBlock() {
@@ -21,23 +23,41 @@ export function StartBlock() {
     return () => { stop = true; clearInterval(i); };
   }, []);
 
+  const tester = useStore((s) => s.tester);
+  const consent = useStore((s) => s.consent);
   const core = !!status && status.voice && status.records && status.db;
   const warm = !!status?.voice_cache;
   const connecting = phase === "connecting";
-  const note = !status ? "Connecting…" : !core ? "Getting ready…" : !warm ? "Warming up my voice…" : "";
+  const note = !status ? "Connecting…" : !core ? "Getting ready…" : !warm ? "Warming up my voice…" : status.llm_busy ? "The AI is busy right now, so I may be slower and simpler for a moment." : "";
+  const pick = (t: Tester) => { useStore.getState().set({ tester: t }); try { localStorage.setItem("hania_tester", t); } catch { /* storage unavailable */ } };
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} style={{ textAlign: "center", padding: "0 24px", maxWidth: 520 }}>
       <Text fontWeight="600" fontSize={{ base: "30px", md: "38px" }} lineHeight="1.1" letterSpacing="-0.025em">Hi, I’m Hania.</Text>
       <Text color="var(--muted)" fontSize={{ base: "15px", md: "17px" }} mt="10px">Ask me about your health, appointments, or anything about the hospital. You can speak English, हिन्दी or اردو.</Text>
-      <Box mt="26px" h="48px">
-        <button className="ctl pill primary" disabled={!core || !warm || connecting} onClick={() => void call.begin()} style={{ fontSize: 15 }}>
+      <Box mt="22px">
+        <Text fontSize="12px" color="var(--muted)" mb="8px">I’m testing as</Text>
+        <Box display="flex" justifyContent="center" flexWrap="wrap" gap="8px" role="radiogroup" aria-label="Who is testing">
+          {TESTERS.map(([key, label]) => (
+            <button key={key} role="radio" aria-checked={tester === key} className={`ctl sm ${tester === key ? "primary" : ""}`} onClick={() => pick(key)}>{label}</button>
+          ))}
+        </Box>
+      </Box>
+      <label style={{ display: "flex", gap: 10, alignItems: "flex-start", justifyContent: "center", textAlign: "left", marginTop: 20, fontSize: 12.5, lineHeight: 1.5, cursor: "pointer", color: "var(--muted)" }}>
+        <input type="checkbox" checked={consent} onChange={(e) => useStore.getState().set({ consent: e.target.checked })} style={{ marginTop: 3, accentColor: "#0A0A0A" }} />
+        <span>
+          I understand Hania is an <b style={{ color: "var(--fg)" }}>AI testing agent, not a doctor</b>, and that this is a test: my conversation (with names, phone numbers and ID numbers masked) is stored
+          for quality review by hospital staff and doctors. In an emergency I will call 1122.
+        </span>
+      </label>
+      <Box mt="18px" h="48px">
+        <button className="ctl pill primary" disabled={!core || !warm || connecting || !consent} onClick={() => void call.begin()} style={{ fontSize: 15 }}>
           {connecting ? "Connecting…" : "Start conversation"}
         </button>
       </Box>
-      <Box h="18px" mt="10px" fontSize="12.5px" color="var(--muted)">{note}</Box>
+      <Box minH="18px" mt="10px" fontSize="12.5px" color="var(--muted)">{note || (!consent ? "Tick the box to start." : "")}</Box>
       <Text fontSize="12px" color="var(--muted)" mt="8px" lineHeight="1.55">
-        I’m an AI testing agent, not a professional doctor. In an emergency call 1122. Calls are recorded for safety and quality. Demo with synthetic data.
+        Demo with synthetic hospital data. Please do not share real personal or medical details.
       </Text>
     </motion.div>
   );

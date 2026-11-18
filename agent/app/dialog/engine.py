@@ -17,7 +17,7 @@ import time
 from datetime import timedelta
 
 from app.config import Settings
-from app.dialog import rules, symptoms
+from app.dialog import rules, symptoms, triage
 from app.dialog.session import HandoverRequest, Line, Reply, Session
 from app.safety import scripts
 from app.safety.guard import check_output
@@ -100,6 +100,7 @@ class Engine:
             safety={"redflag": "alert", "scope": "ok", "pii": "on", "llm_check": "alert" if source == "llm" else "skip"},
             intent="emergency",
         )
+        r.triage = triage.brief(s, "emergency", [f"red flag ({source}): {category or 'unspecified'}"])
         return r
 
     def _not_caught(self, s: Session) -> Reply:
@@ -131,12 +132,20 @@ class Engine:
         if rf:
             return self._emergency(s, rf.kind, rf.category, "rules", rf.matched)
 
+        if s.state not in ("AWAIT_NAME", "AWAIT_DOB"):
+            triage.note_age(s, norm)  # an age the caller volunteers ("I'm 45", "my son is 6 years old") is remembered for triage
+
         # 2. identity steps: parsed locally, text not sent to the cloud LLM
         if s.state in ("AWAIT_NAME", "AWAIT_DOB"):
             r = await self._identity_step(s, raw, norm)
             if r is not None:
                 return r
             # not a name/dob -> fall through to normal analysis (e.g. caller asked for a human)
+
+        # 2a. the age question of a symptom interview is answered directly: no AI call, and a bare "30" is never mistaken for a new request
+        if s.state == "AWAIT_SYMPTOM_Q" and s.flow.get("idx", 0) < 0 and rules.rule_intent(norm) is None \
+                and (triage.parse_age(norm, bare=True) is not None or len(norm.split()) <= 3):
+            return await self._symptom_answer(s, norm)
 
         # 2b. LATENCY: benign turns are answered at once from the rules; the AI safety net runs in PARALLEL and can still
         # interrupt (see late_action). Only when a real LLM route is available and the rules are confident.
@@ -168,6 +177,15 @@ class Engine:
         # The AI safety net is offline: be stricter. Any mention of symptoms goes to a human instead of
         # carrying on with a booking, because only the keyword rules are left to catch a red flag.
         if analysis is None and not fast and rules.mentions_symptoms(norm):
+            # Free-tier AI keys run out under load. For a COMMON complaint we know, carry on with the fixed yes/no interview
+            # (its danger questions screen for warning signs and hand over to staff) instead of sending every tester to staff.
+            topic = symptoms.match_topic(norm) if s.state == "IDLE" else None
+            if topic and self.s.symptom_guidance and not rules.is_strict_medical(norm) and rules.rule_intent(norm) in (None, "medical_question"):
+                r = self._start_symptom_interview(s, topic)
+                r.nlu_ms = nlu_ms
+                r.trace.insert(0, {"step": "safety", "status": "alert", "detail": "AI safety net unavailable: using the fixed symptom interview (rules + danger questions)"})
+                r.safety = {"redflag": "ok", "scope": "ok", "pii": "on", "llm_check": "offline"}
+                return r
             r = self._handover(
                 s, [_l("medical_refusal")], HandoverRequest("medical_advice_request", "urgent", "symptoms_while_ai_offline", "rules"),
                 trace=[{"step": "safety", "status": "alert", "detail": "symptoms mentioned while AI safety net is offline - handing over"}],
@@ -412,7 +430,8 @@ class Engine:
         """Ask a follow-up or give possible common explanations (not a diagnosis). None -> caller falls back (interview / staff)."""
         topic = symptoms.match_topic(norm)
         try:
-            d = await self.doctor.advise(list(s.history), self._mask_for_llm(raw), topic.label if topic else None, s.doctor_turns)
+            known = {"age": s.triage.get("age"), "age_group": s.triage.get("age_group")} if s.triage.get("age") is not None else {}
+            d = await self.doctor.advise(list(s.history), self._mask_for_llm(raw), topic.label if topic else None, s.doctor_turns, known)
         except Exception:
             log.exception("doctor mode failed")
             d = None
@@ -436,6 +455,14 @@ class Engine:
             s.state, s.last_prompt = "AWAIT_DOCTOR", d.reply
             return Reply(lines=lines, state="AWAIT_DOCTOR", intent="doctor_chat", trace=trace, safety={"scope": "ok"}, sources=sources)
         s.doctor_turns = 0
+        tier, why = triage.adjust_for_age(triage.clean_tier(getattr(d, "urgency", None)), s.triage.get("age_group", "unknown"), topic.key if topic else None)
+        tier = triage.clean_tier(tier) if tier != "emergency" else "same_day"  # the red-flag rules / AI safety net alone declare an emergency
+        s.triage.update({"topic": topic.key if topic else "", "topic_label": topic.label if topic else "other health concern", "tier": tier,
+                         "reasons": ([why] if why else []) + ["assessed by the AI in doctor mode, not by a clinician"], "source": "doctor_mode",
+                         "tags": [], "answers": [{"q": h["text"][:200], "a": "caller"} for h in s.history if h.get("role") == "caller"][-4:]})
+        trace[0]["detail"] += f"; suggested: {triage.LABELS[tier]}"
+        if tier in ("same_day",) and getattr(d, "urgency", None) == "same_day":
+            lines.append(Line(text=triage.tier_line("same_day")))
         if "appointment" in d.reply.lower():  # the model already offered one: just leave the door open
             outro = Line(text="Is there anything else I can help you with?")
         else:
@@ -443,17 +470,20 @@ class Engine:
         lines.append(outro)
         s.state, s.last_prompt = "IDLE", outro.text
         return Reply(lines=lines, state="IDLE", intent="doctor_chat", trace=trace, safety={"scope": "ok"}, sources=sources,
-                     event={"type": "symptom_guidance", "chunk": "doctor_mode"})
+                     triage=triage.brief(s), event={"type": "symptom_guidance", "chunk": "doctor_mode"})
 
     # ------------------------------------------------------------------ symptom interview (common, usually mild complaints)
     def _start_symptom_interview(self, s: Session, topic: symptoms.Topic) -> Reply:
-        s.flow = {"symptom": topic.key, "idx": 0, "tags": []}
+        s.triage.update({"topic": topic.key, "topic_label": topic.label, "answers": [], "tags": [], "reasons": [], "tier": None, "source": "interview"})
+        # intake: the age changes the urgency (babies, young children and older adults are seen sooner), so ask it first unless known
+        ask_age = s.triage.get("age") is None
+        s.flow = {"symptom": topic.key, "idx": -1 if ask_age else 0, "tags": [], "age_tries": 0}
         s.unclear = 0
-        q = topic.questions[0].text
+        q = scripts.fixed("symptom_age_q") if ask_age else topic.questions[0].text
         s.state = "AWAIT_SYMPTOM_Q"
         s.last_prompt = q
         return Reply(
-            lines=[_l("symptom_intro"), Line(text=q)], state="AWAIT_SYMPTOM_Q", intent="symptom_triage",
+            lines=[_l("symptom_intro"), _l("symptom_age_q") if ask_age else Line(text=q)], state="AWAIT_SYMPTOM_Q", intent="symptom_triage",
             trace=[{"step": "route", "status": "ok", "detail": f"symptom interview started: {topic.label} (not a diagnosis)"}],
             safety={"scope": "ok"},
         )
@@ -463,6 +493,20 @@ class Engine:
         if rules.wants_never_mind(norm):
             s.flow = {}
             return self._reply(s, [_l("never_mind")], "IDLE")
+        if s.flow["idx"] < 0:  # intake question: how old is the patient?
+            age = triage.parse_age(norm, bare=True)
+            if age is None and s.flow.get("age_tries", 0) < 1:
+                s.flow["age_tries"] = s.flow.get("age_tries", 0) + 1
+                s.last_prompt = scripts.fixed("symptom_age_retry")
+                return Reply(lines=[_l("symptom_age_retry")], state="AWAIT_SYMPTOM_Q", intent="symptom_triage",
+                             trace=[{"step": "route", "status": "skip", "detail": "needed an age"}])
+            if age is not None:
+                s.triage["age"], s.triage["age_group"] = age, triage.age_group(age)
+            s.flow["idx"] = 0  # an unclear second answer just continues without an age (the safer, more cautious path is used)
+            first = topic.questions[0].text
+            s.last_prompt = first
+            return Reply(lines=[Line(text=first)], state="AWAIT_SYMPTOM_Q", intent="symptom_triage",
+                         trace=[{"step": "route", "status": "ok", "detail": f"{topic.label}: patient is {triage.GROUP_TEXT[s.triage.get('age_group', 'unknown')]}"}])
         yes, no = rules.is_yes(norm), rules.is_no(norm)
         q = topic.questions[s.flow["idx"]]
         if not (yes or no):
@@ -476,12 +520,16 @@ class Engine:
             return self._reply(s, [_l("symptom_retry"), Line(text=q.text)], trace=[{"step": "route", "status": "skip", "detail": "needed yes or no"}])
         s.unclear = 0
         answer = "yes" if yes else "no"
+        s.triage.setdefault("answers", []).append({"q": q.text, "a": answer})
         if q.danger_if == answer:
-            return self._handover(
+            s.triage.update({"tier": "same_day", "reasons": [f"warning sign reported: {q.text}"], "tags": list(s.flow.get("tags", []))})
+            r = self._handover(
                 s, [_l("symptom_escalate")], HandoverRequest("symptom_escalation", "urgent", topic.key, "rules"),
                 trace=[{"step": "safety", "status": "alert", "detail": f"{topic.label}: warning sign reported - handing over to staff"}],
                 safety={"redflag": "alert", "scope": "ok"}, intent="symptom_triage",
             )
+            r.triage = triage.brief(s)
+            return r
         tag = q.tag_if_yes if answer == "yes" else q.tag_if_no
         if tag:
             s.flow["tags"].append(tag)
@@ -504,16 +552,20 @@ class Engine:
             lines.append(Line(text=top["text"], trusted=False))
             chunk = top["chunk_id"]
             sources = [{"title": top["title"], "version": top["version"], "chunk_id": top["chunk_id"], "score": top["score"]}]
+        tier, reasons = triage.decide_symptom_tier(topic.key, tags, s.triage.get("age_group", "unknown"))
+        s.triage.update({"tier": tier, "reasons": reasons, "tags": tags})
         if "prolonged" in tags:
             lines.append(Line(text="Because this has gone on for a while, I'd recommend being seen."))
+        else:
+            lines.append(Line(text=triage.tier_line(tier)))
         outro = (f"I can book you an appointment in {topic.dept}, or connect you to our staff. What would you like? "
                  f"If it gets worse, please call {self.s.emergency_number}.")
         lines.append(Line(text=outro))
         s.last_prompt = outro
         s.flow, s.state = {}, "IDLE"
         return Reply(
-            lines=lines, state="IDLE", intent="symptom_triage", sources=sources,
-            trace=[{"step": "respond", "status": "ok", "detail": f"{topic.label}: common causes + approved guidance (not a diagnosis)"}],
+            lines=lines, state="IDLE", intent="symptom_triage", sources=sources, triage=triage.brief(s),
+            trace=[{"step": "respond", "status": "ok", "detail": f"{topic.label}: {triage.LABELS[tier]} - common causes + approved guidance (not a diagnosis)"}],
             safety={"scope": "ok"}, event={"type": "symptom_guidance", "chunk": chunk},
         )
 
