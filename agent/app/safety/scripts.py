@@ -8,10 +8,9 @@ from app.config import get_settings
 
 _RAW: dict[str, str] = {
     "greeting": (
-        "Hello, this is {name}, the virtual assistant of {hospital}. "
-        "I'm an AI testing agent, not a professional doctor, so please treat anything I say as general information. "
-        "If this is an emergency, please hang up and call {emergency}. "
-        "This call is recorded for safety and quality. How can I help you today?"
+        "Hi, I'm {name}, the virtual assistant of {hospital}. "
+        "I'm an AI testing agent, not a doctor. In an emergency, call {emergency}. "
+        "How can I help?"
     ),
     "doctor_disclaimer": "Just so you know, I'm a testing agent and not a professional doctor, so this is general information only.",
     "doctor_outro": "If you're worried or it gets worse, please see a doctor. I can book you an appointment, or connect you to our staff. What would you like?",
