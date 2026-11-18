@@ -61,6 +61,22 @@ _HUMAN = re.compile(
     r"(human|person|someone|somebody|staff|agent|representative|operator|receptionist|reception|front desk|help ?desk|nurse|doctor|real person)"
     r"|\b(human|real person|operator|receptionist|insaan)\b|kisi se baat|staff se baat|baat karni|کسی سے بات|انسان|عملے"
 )
+_ROLE_DOCTOR = re.compile(r"\b(i am|i m|i'm|im) (a |an |the )?(doctor|physician|consultant|clinician|nurse|surgeon)\b|\bas a (doctor|physician|nurse|clinician)\b|\bmy patients\b")
+_ROLE_QA = re.compile(r"\b(i am|i m|i'm|im) (a |an |the |just )?(qa|tester|testing|test)\b|\bwe are testing\b|\bi am (just )?testing\b|\bthis is a test\b|\btesting (the|this)\b|\bqa test")
+_ROLE_OWNER = re.compile(r"\b(i am|i m|i'm|im) (the |a |an )?(owner|founder|ceo|director|manager|administrator)\b|\bmy (hospital|clinic)\b|\bi own (this|the)\b")
+
+
+def infer_role(norm: str) -> str | None:
+    """Who is talking, judged only from what they say about themselves (nobody is asked to pick a role). None = no clue."""
+    if _ROLE_DOCTOR.search(norm):
+        return "doctor"
+    if _ROLE_OWNER.search(norm):
+        return "owner"
+    if _ROLE_QA.search(norm):
+        return "qa"
+    return None
+
+
 _HUMAN_WORDS = re.compile(
     r"(human|person|people|someone|somebody|staff|representative|operator|receptionist|reception|front desk|help ?desk|nurse|agent|insaan|admin)|baat|کسی|انسان|عملے|इंसान|स्टाफ़?|किसी से"
 )

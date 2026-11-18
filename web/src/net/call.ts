@@ -54,7 +54,7 @@ export class CallClient {
     this.ws = ws;
     ws.onopen = () => {
       const g = useStore.getState();
-      ws.send(JSON.stringify({ type: "start", lang: g.lang, role: g.tester, consent: g.consent }));
+      ws.send(JSON.stringify({ type: "start", lang: g.lang, consent: g.consent }));
       useStore.getState().set({ phase: "live" });
       void this.startMic();
     };

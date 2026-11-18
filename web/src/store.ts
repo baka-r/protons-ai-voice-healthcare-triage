@@ -10,7 +10,6 @@ export interface Caption { id: number; role: "caller" | "assistant"; text: strin
 export interface TraceItem { id: number; step: string; status: StepStatus; detail: string; t: number }
 export interface Timing { stt_ms?: number | null; nlu_ms?: number | null; tts_first_ms?: number | null; server_ms?: number | null; e2e_ms?: number | null }
 export interface Source { title: string; version: number; score: number; chunk_id: string }
-export type Tester = "patient" | "qa" | "doctor" | "owner";
 export interface Triage { tier: "self_care" | "see_doctor_soon" | "same_day" | "emergency"; label: string; topic: string; age_group: string; reasons: string[] }
 export interface Status {
   llm: boolean; llm_busy?: boolean; stt: boolean; voice: boolean; voice_cache: boolean; records: boolean; knowledge: boolean; db: boolean;
@@ -24,7 +23,6 @@ interface S {
   muted: boolean;
   sfx: boolean;
   lang: Lang;
-  tester: Tester;
   consent: boolean;
   triage: Triage | null;
   rated: Record<number, "up" | "down">;
@@ -49,9 +47,6 @@ interface S {
 }
 
 let seq = 1;
-function readTester(): Tester {
-  try { const v = localStorage.getItem("hania_tester"); return v === "qa" || v === "doctor" || v === "owner" ? v : "patient"; } catch { return "patient"; }
-}
 function readLang(): Lang {
   try { const v = localStorage.getItem("hania_lang"); return v === "hi" || v === "ur" ? v : "en"; } catch { return "en"; }
 }
@@ -65,7 +60,6 @@ export const useStore = create<S>((set) => ({
   ...initial,
   status: null,
   lang: readLang(),
-  tester: readTester(),
   consent: false,
   drawer: false,
   set: (p) => set(p),
@@ -76,5 +70,5 @@ export const useStore = create<S>((set) => ({
       steps: { ...s.steps, [t.step]: { status: t.status, detail: t.detail } },
     })),
   resetTurn: () => set({ steps: {}, sources: [] }),
-  reset: () => set((s) => ({ ...initial, lang: s.lang, tester: s.tester, consent: s.consent })),
+  reset: () => set((s) => ({ ...initial, lang: s.lang, consent: s.consent })),
 }));

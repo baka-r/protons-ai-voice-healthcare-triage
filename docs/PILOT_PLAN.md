@@ -6,8 +6,8 @@ Hania is a **testing agent, not a doctor**. This plan describes how to test it s
 
 | Group | What they do | Where |
 |---|---|---|
-| **Patients** (small invited group) | Talk to Hania about ordinary things: opening hours, booking, a mild health question. Tap 👍/👎 on answers. Do not share real personal or medical details. | `https://protons.upscaleleads.cloud` → "Patient" |
-| **QA testers** | Work through the scripted scenarios (Details → "Try these"), then try to break her: odd wording, Hindi/Urdu/Roman Urdu, interruptions, silence. Report with 👎 + a one-line comment. | same page → "QA tester" |
+| **Patients** (small invited group) | Talk to Hania about ordinary things: opening hours, booking, a mild health question. Tap 👍/👎 on answers. Do not share real personal or medical details. | `https://protons.upscaleleads.cloud` |
+| **QA testers** | Work through the scripted scenarios (Details → "Try these"), then try to break her: odd wording, Hindi/Urdu/Roman Urdu, interruptions, silence. Report with 👎 + a one-line comment. | same page |
 | **Doctors** | Review flagged calls in **Staff → Doctor review**: mark each Hania answer *Safe*, *Wrong* or *Unsafe*, give the correct urgency and wording. Weekly 60-minute session. | `/staff` with their own account |
 | **Owner** | Watches **Staff → Owner** (calls, hand-over rate, urgency mix, feedback, speed, AI health). Decides go / pause. | `/staff` with the owner account |
 

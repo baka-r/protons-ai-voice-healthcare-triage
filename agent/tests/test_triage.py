@@ -173,3 +173,14 @@ async def test_an_explicit_request_for_a_person_still_hands_over():
     eng = Engine(Settings(), FakeLLM(A(intent="talk_to_human")), FakeEMR(), FakeRAG([]), None, None)
     r = await eng.handle(Session(id="t"), "can I talk to a real person")
     assert r.handover and r.handover.reason == "caller_requested"
+
+
+# ---------------------------------------------------------------- nobody picks a role: it is inferred from what they say
+@pytest.mark.parametrize("text,role", [
+    ("I'm a doctor and I want to test this", "doctor"), ("I am a nurse at another hospital", "doctor"), ("I'm the owner of this hospital", "owner"),
+    ("we are testing the assistant", "qa"), ("I am just testing", "qa"), ("this is a test", "qa"),
+    ("I want to see a doctor", None), ("my doctor said to rest", None), ("what are your OPD timings", None), ("I have a headache", None),
+])
+def test_infer_role(text, role):
+    from app.dialog import rules
+    assert rules.infer_role(normalize(text)) == role

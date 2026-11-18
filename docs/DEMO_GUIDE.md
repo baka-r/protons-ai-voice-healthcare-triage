@@ -2,7 +2,7 @@
 
 Open `https://protons.upscaleleads.cloud` on a laptop with a microphone (Chrome), and `/staff` on a second screen signed in as the owner.
 
-**Before you start:** Staff → Owner → *Reset demo queue*. Check the start screen shows no "AI is busy" note. Choose how you are testing (Patient / QA tester / Doctor / Owner), tick the consent box, press *Start conversation*.
+**Before you start:** Staff → Owner → *Reset demo queue*. Check the start screen shows no "AI is busy" note. Tick the consent box, press *Start conversation*.
 
 Open **Details** (top right) → **Try these**: every scenario below is a clickable script that sends each line as if you had spoken it.
 

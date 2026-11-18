@@ -68,6 +68,7 @@ class CallSession:
         self._timing: dict[str, Any] | None = None
         self._brief: dict[str, Any] | None = None  # triage brief of the reply being delivered (given to staff on a hand-over)
         self._feedback_count = 0
+        self._consent = False
 
     # ------------------------------------------------------------------ plumbing
     async def send(self, obj: dict) -> None:
@@ -119,7 +120,8 @@ class CallSession:
         if lang in ("hi", "ur"):
             s.language = lang
             await self.send({"type": "language", "lang": lang})
-        s.role = role if role in ("patient", "owner", "doctor", "qa") else "patient"
+        s.role = role if role in ("patient", "owner", "doctor", "qa") else "patient"  # the web page no longer asks: Hania works it out (see _note_role)
+        self._consent = consent
         d.hub.calls[s.id] = self
         d.store.fire(d.store.create_session, s.id)
         d.store.fire(d.store.add_session_info, s.id, s.role, consent)
@@ -381,6 +383,7 @@ class CallSession:
                     return
             text = (text or "").strip()
             await self._maybe_switch_language(text)
+            self._note_role(text)
             state_before = s.state
             identity = state_before in ("AWAIT_NAME", "AWAIT_DOB")
             self._last_text = text
@@ -419,6 +422,16 @@ class CallSession:
                 except asyncio.CancelledError:
                     pass
         await self._deliver(reply, timing)
+
+    def _note_role(self, text: str) -> None:
+        """Nobody picks a role: if the caller says who they are ("I'm a doctor", "I'm testing this"), record it for the owner's statistics."""
+        s = self.s
+        if s.role != "patient" or not text:
+            return
+        found = rules.infer_role(normalize(text))
+        if found:
+            s.role = found
+            self.d.store.fire(self.d.store.add_session_info, s.id, found, self._consent)
 
     # ------------------------------------------------------------------ language
     def _stt_hint(self) -> str | None:
