@@ -169,6 +169,8 @@ async def main():
         check("dashboard counts testers by role", s.get("testers", {}).get("qa", 0) >= 1, str(s.get("testers")))
         rs = await h.post(f"{HTTP}/api/admin/demo/reset", headers=oa)
         check("owner can reset the demo queue", rs.status_code == 200)
+        await h.post(f"{HTTP}/api/admin/accounts/{uname}", json={"active": False}, headers=oa)  # leave no usable test account behind
+        check("test doctor account is deactivated and can no longer sign in", (await h.post(f"{HTTP}/api/staff/login", json={"username": uname, "password": "a-long-password-1"}, headers={"X-Real-IP": "10.99.7.9"})).status_code == 401)
         ver = (await h.get(f"{HTTP}/api/audit/verify", headers=oa)).json()
         check("audit chain still verifies", ver.get("ok") is True, str(ver))
 
