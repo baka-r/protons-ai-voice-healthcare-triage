@@ -268,14 +268,11 @@ class CallSession:
                     data = await tasks[i]
                     await pause_before(i)
                     await self._send_pcm(data, timing)
-                else:  # uncached: stream it as it is produced; start the next ones only once audio is flowing
+                else:  # uncached: queue the following sentences right behind it (the engine does one at a time, in order)
+                    prepare_next(i)
                     await pause_before(i)
-                    prepared = False
                     async for chunk in tts.stream_shared(part, voice):
                         await self._first_audio(timing)
-                        if not prepared:
-                            prepare_next(i)
-                            prepared = True
                         for j in range(0, len(chunk), 16384):
                             await self.send_bytes(chunk[j:j + 16384])
         finally:

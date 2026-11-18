@@ -96,7 +96,9 @@ class TTS:
         self.warm_total = 0
         self.warm_done = 0
         self._fixed_keys: set[str] = set()
-        self._sem = asyncio.Semaphore(2)  # the CPU engine thrashes beyond ~2 parallel syntheses
+        # ONE synthesis at a time, strictly in request order: measured on the 2-4 core VPS, two parallel syntheses each run
+        # 2-3x slower, so the sentence that is about to be needed arrives late and the voice stops mid-answer.
+        self._sem = asyncio.Semaphore(1)
         self._inflight: dict[str, asyncio.Future] = {}  # single-flight: identical sentences share one synthesis
         self._prune_disk()
 
