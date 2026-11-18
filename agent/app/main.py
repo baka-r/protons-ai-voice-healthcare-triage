@@ -344,6 +344,7 @@ async def ws_call(ws: WebSocket):
     activity = {"t": time.monotonic()}
     started = time.monotonic()
     max_bytes = int(s.max_audio_seconds * 16000 * 2)
+    diag_n = 0
 
     def spawn(coro):
         t = asyncio.get_running_loop().create_task(coro)
@@ -384,6 +385,10 @@ async def ws_call(ws: WebSocket):
                     continue
                 if kind == "start":
                     spawn(call.start(str(data.get("lang", "en"))[:2], str(data.get("role", "patient"))[:12], bool(data.get("consent"))))
+                elif kind == "diag":  # what the caller's microphone/audio path is doing (no personal data); capped per call
+                    diag_n += 1
+                    if diag_n <= 15:
+                        log.info("client_diag session=%s %s", call.s.id, json.dumps(data.get("d"), ensure_ascii=False)[:700])
                 elif kind == "feedback":
                     spawn(call.feedback(str(data.get("rating", ""))[:4], str(data.get("comment", ""))[:600], str(data.get("text", ""))[:900]))
                 elif kind == "set_language":

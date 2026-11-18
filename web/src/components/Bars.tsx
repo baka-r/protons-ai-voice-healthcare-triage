@@ -51,6 +51,7 @@ export function BottomBar() {
   const mode = useStore((s) => s.mode);
   const handover = useStore((s) => s.handover);
   const emergency = useStore((s) => s.session?.emergency ?? "1122");
+  const holding = useStore((s) => s.holding);
   const [typing, setTyping] = useState(false);
   const [text, setText] = useState("");
   const submit = () => { if (text.trim()) { call.sendText(text); setText(""); } };
@@ -73,7 +74,16 @@ export function BottomBar() {
         </button>
         <button className="ctl round danger" onClick={() => call.end()} aria-label="End call" title="End call"><FiPhoneOff /></button>
       </Flex>
-      <Flex justify="center" align="center" wrap="wrap" gap="6px 14px" mt="16px" fontSize="12.5px" color="var(--muted)">
+      <Flex justify="center" mt="14px">
+        <button className={`ctl pill ${holding ? "primary" : ""}`} aria-label="Hold to talk"
+          style={{ height: 44, touchAction: "none", userSelect: "none", WebkitUserSelect: "none", fontSize: 14 }}
+          onPointerDown={(e) => { e.preventDefault(); void call.holdStart(); }}
+          onPointerUp={() => call.holdEnd()} onPointerCancel={() => call.holdEnd()} onPointerLeave={() => { if (holding) call.holdEnd(); }}
+          onContextMenu={(e) => e.preventDefault()}>
+          {holding ? "Listening… release to send" : "Hold to talk"}
+        </button>
+      </Flex>
+      <Flex justify="center" align="center" wrap="wrap" gap="6px 14px" mt="12px" fontSize="12.5px" color="var(--muted)">
         <button className="link" disabled={!!handover} onClick={() => call.requestHuman()}>Talk to a person</button>
         <span style={{ color: mode === "emergency" ? "var(--bad)" : undefined, fontWeight: mode === "emergency" ? 600 : 400 }}>
           AI testing agent, not a professional doctor · In an emergency call {emergency}

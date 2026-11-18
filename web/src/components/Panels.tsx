@@ -78,6 +78,28 @@ function Stat({ label, v, good }: { label: string; v?: number | null; good: numb
   );
 }
 
+function MicSection() {
+  const d = useStore((s) => s.micDiag) as Record<string, number | string | boolean> | null;
+  const micError = useStore((s) => s.micError);
+  if (!d) return null;
+  const heard = Number(d.starts) > 0;
+  return (
+    <Section title="Microphone check">
+      <Flex direction="column" gap="7px" fontSize="13.5px">
+        <Flex justify="space-between"><span>Microphone</span><span style={{ color: micError ? "var(--bad)" : Number(d.frames) > 0 ? "var(--ok)" : "var(--warn)" }}>{micError ? "blocked" : Number(d.frames) > 0 ? "on" : "starting…"}</span></Flex>
+        <Flex justify="space-between"><span>Sound frames received</span><span>{String(d.frames)}</span></Flex>
+        <Flex justify="space-between"><span>Loudest level</span><span>{String(d.maxLevel)}</span></Flex>
+        <Flex justify="space-between"><span>Speech detected</span><span style={{ color: heard ? "var(--ok)" : "var(--muted)" }}>{String(d.starts)}</span></Flex>
+        <Flex justify="space-between"><span>Sent to Hania</span><span>{String(Number(d.sent) + 0)}</span></Flex>
+        <Flex justify="space-between"><span>Audio engine</span><span>{String(d.vadCtx)} / {String(d.playerCtx)}</span></Flex>
+      </Flex>
+      <Text mt="10px" fontSize="12px" color="var(--muted)" lineHeight="1.5">
+        If "Sound frames" stays 0, the browser is not giving the page your microphone. If frames rise but "Speech detected" stays 0, speak louder or use "Hold to talk".
+      </Text>
+    </Section>
+  );
+}
+
 function LatencySection() {
   const t = useStore((s) => s.timing);
   return (
@@ -186,6 +208,7 @@ export function DetailsDrawer() {
             </Flex>
           </Flex>
           <ScenariosSection />
+          <MicSection />
           <SafetySection />
           <PipelineSection />
           <LatencySection />

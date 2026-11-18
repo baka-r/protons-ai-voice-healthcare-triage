@@ -29,6 +29,32 @@ export class CallClient {
   private vadCtx?: AudioContext;
   private micStream?: Promise<MediaStream>;
   private blockedPoll = 0;
+  private diag = { frames: 0, maxLevel: 0, starts: 0, ends: 0, misfires: 0, sent: 0, holdSent: 0, err: "" };
+  private diagTimer?: ReturnType<typeof setInterval>;
+  private diagSent = 0;
+  private hold?: { src: MediaStreamAudioSourceNode; proc: ScriptProcessorNode; chunks: Float32Array[]; on: boolean };
+
+  /** What this phone's microphone path is doing, for the Details panel and (anonymously) for our server log. */
+  private snapshot() {
+    return {
+      ...this.diag, vadCtx: this.vadCtx?.state ?? "none", playerCtx: this.player?.ctx.state ?? "none",
+      sampleRate: this.vadCtx?.sampleRate ?? 0, vadRunning: !!this.vad,
+    };
+  }
+
+  private async report(final = false) {
+    const snap = this.snapshot();
+    useStore.getState().set({ micDiag: snap });
+    if (this.diagSent >= 12 && !final) return;
+    this.diagSent++;
+    let track: Record<string, unknown> = {};
+    try {
+      const st = await this.micStream;
+      const t = st?.getAudioTracks()[0];
+      if (t) track = { ready: t.readyState, muted: t.muted, enabled: t.enabled, settings: t.getSettings?.() };
+    } catch { /* no stream */ }
+    this.send({ type: "diag", d: { ...snap, track, ua: navigator.userAgent.slice(0, 140), touch: navigator.maxTouchPoints } });
+  }
 
   /** iPhone/Safari only allows audio and the microphone to start INSIDE the tap itself. This must run before any `await` in begin(). */
   private unlockAudio() {
@@ -91,6 +117,8 @@ export class CallClient {
       ws.send(JSON.stringify({ type: "start", lang: g.lang, consent: g.consent }));
       useStore.getState().set({ phase: "live" });
       void this.startMic();
+      this.diagSent = 0;
+      this.diagTimer = setInterval(() => { void this.report(); }, 5000);
     };
     ws.onmessage = (ev) => (typeof ev.data === "string" ? this.onJson(JSON.parse(ev.data)) : this.player?.enqueue(ev.data as ArrayBuffer));
     ws.onclose = () => {
@@ -106,6 +134,7 @@ export class CallClient {
     if (++this.blockedPoll % 30 === 0) {
       const blocked = [this.player?.ctx, this.vadCtx].some((c) => !!c && c.state !== "running");
       if (blocked !== useStore.getState().audioBlocked) useStore.getState().set({ audioBlocked: blocked });
+      if (this.blockedPoll % 60 === 0 && useStore.getState().drawer) useStore.getState().set({ micDiag: this.snapshot() });
     }
     this.player?.tick();
     levels.mic *= 0.9;
@@ -125,19 +154,25 @@ export class CallClient {
         minSpeechMs: 250,
         audioContext: this.vadCtx,
         getStream: () => this.micStream ?? navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
+        onVADMisfire: () => { this.diag.misfires++; },
         onFrameProcessed: (_p, frame) => {
+          this.diag.frames++;
           let sum = 0;
           for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
           const rms = Math.sqrt(sum / frame.length);
           levels.mic = Math.max(levels.mic, Math.min(1, rms * 9));
+          if (rms > this.diag.maxLevel) this.diag.maxLevel = Math.round(rms * 1000) / 1000;
         },
         onSpeechStart: () => this.onSpeechStart(),
         onSpeechEnd: (audio: Float32Array) => this.onSpeechEnd(audio),
       });
       await this.vad.start();
       useStore.getState().set({ micError: null });
+      void this.report();
     } catch (e) {
       console.warn("microphone unavailable", e);
+      this.diag.err = `${(e as { name?: string })?.name ?? "error"}: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
+      void this.report();
       const name = (e as { name?: string })?.name ?? "";
       const msg = name === "NotAllowedError" || name === "SecurityError"
         ? "Microphone is blocked. Allow it for this site in your browser settings, then start again. You can type meanwhile."
@@ -148,6 +183,7 @@ export class CallClient {
   }
 
   private onSpeechStart() {
+    this.diag.starts++;
     const st = useStore.getState();
     if (st.mode === "emergency" || st.mode === "connected") return;
     if (this.player?.playing) {
@@ -159,7 +195,9 @@ export class CallClient {
   }
 
   private onSpeechEnd(audio: Float32Array) {
+    this.diag.ends++;
     if (useStore.getState().muted) return;
+    this.diag.sent++;
     this.speechEndAt = performance.now();
     this.waiting = true;
     this.player?.armFirstChunk();
@@ -168,6 +206,55 @@ export class CallClient {
 
   send(obj: object) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(obj));
+  }
+
+  /** Fallback that does not depend on automatic speech detection: press and hold, speak, release. */
+  async holdStart() {
+    if (useStore.getState().muted || !this.vadCtx || !this.micStream) return;
+    this.unlock();
+    try {
+      if (!this.hold) {
+        const stream = await this.micStream;
+        const src = this.vadCtx.createMediaStreamSource(stream);
+        const proc = this.vadCtx.createScriptProcessor(4096, 1, 1);
+        const h = { src, proc, chunks: [] as Float32Array[], on: false };
+        proc.onaudioprocess = (e) => { if (h.on) h.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+        src.connect(proc);
+        proc.connect(this.vadCtx.destination);
+        this.hold = h;
+      }
+    } catch (e) {
+      useStore.getState().set({ micError: "Microphone is blocked. Allow it for this site in your browser settings." });
+      this.diag.err = `hold: ${(e as Error)?.name ?? "error"}`;
+      return;
+    }
+    this.hold.chunks = [];
+    this.hold.on = true;
+    if (this.player?.playing) { this.player.stop(); this.send({ type: "barge_in" }); }
+    useStore.getState().set({ ui: "listening", holding: true });
+    sfx.listen();
+  }
+
+  holdEnd() {
+    const h = this.hold;
+    useStore.getState().set({ holding: false });
+    if (!h || !h.on || !this.vadCtx) return;
+    h.on = false;
+    const total = h.chunks.reduce((n, c) => n + c.length, 0);
+    const rate = this.vadCtx.sampleRate;
+    if (total < rate * 0.35) return; // a tap, not speech
+    const all = new Float32Array(total);
+    let o = 0;
+    for (const c of h.chunks) { all.set(c, o); o += c.length; }
+    h.chunks = [];
+    const ratio = rate / 16000; // linear resample to the 16 kHz the server expects
+    const out = new Float32Array(Math.floor(all.length / ratio));
+    for (let i = 0; i < out.length; i++) {
+      const x = i * ratio, i0 = Math.floor(x), f = x - i0;
+      out[i] = all[i0] * (1 - f) + (all[Math.min(i0 + 1, all.length - 1)] * f);
+    }
+    this.diag.holdSent++;
+    this.onSpeechEnd(out);
   }
 
   sendText(text: string) {
@@ -214,6 +301,9 @@ export class CallClient {
   private teardown() {
     cancelAnimationFrame(this.raf);
     document.removeEventListener("pointerdown", this.onGesture);
+    if (this.diagTimer) clearInterval(this.diagTimer);
+    try { this.hold?.proc.disconnect(); this.hold?.src.disconnect(); } catch { /* already gone */ }
+    this.hold = undefined;
     void this.micStream?.then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => undefined);
     void this.vad?.destroy();
     void this.vadCtx?.close().catch(() => undefined);

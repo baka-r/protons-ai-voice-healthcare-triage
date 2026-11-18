@@ -28,6 +28,8 @@ interface S {
   rated: Record<number, "up" | "down">;
   micError: string | null;
   audioBlocked: boolean;
+  holding: boolean;
+  micDiag: Record<string, unknown> | null;
   error: string | null;
   captions: Caption[];
   trace: TraceItem[];
@@ -53,7 +55,7 @@ function readLang(): Lang {
 }
 const initial = {
   phase: "boot" as Phase, ui: "idle" as UiState, mode: "normal" as Mode, playing: false, muted: false, sfx: true, lang: "en" as Lang,
-  micError: null, audioBlocked: false, error: null, captions: [], trace: [], steps: {}, safety: { redflag: "ok", scope: "ok", pii: "on", llm_check: "ok" },
+  micError: null, audioBlocked: false, holding: false, micDiag: null as Record<string, unknown> | null, error: null, captions: [], trace: [], steps: {}, safety: { redflag: "ok", scope: "ok", pii: "on", llm_check: "ok" },
   sources: [], timing: {}, intent: null, session: null, handover: null, triage: null as Triage | null, rated: {} as Record<number, "up" | "down">,
 };
 
