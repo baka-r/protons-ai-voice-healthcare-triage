@@ -279,7 +279,7 @@ class Engine:
                 trace=[{"step": "safety", "status": "alert", "detail": "AI safety net: medical advice request - handing over"}],
                 safety={"scope": "block", "llm_check": "ok"}, intent="medical_question",
             )
-        if a.intent == "talk_to_human" and rules.rule_intent(norm) not in self.BENIGN:
+        if a.intent == "talk_to_human" and rules.rule_intent(norm) not in self.BENIGN and rules.explicit_human_request(norm):
             # (explicit requests for a person are caught by the rules; the AI alone must not turn a hospital-info question into a hand-over)
             return self._handover(
                 s, [_l("human_request")], HandoverRequest("caller_requested", "routine", source="llm"),
@@ -291,6 +291,8 @@ class Engine:
     async def _route(self, s: Session, raw: str, norm: str, a: Analysis | None, fast: bool) -> Reply:
         rule_i = rules.rule_intent(norm)
         intent = rule_i or (a.intent if a else None)
+        if intent == "talk_to_human" and not rule_i and not rules.explicit_human_request(norm):
+            intent = "hospital_info"  # the AI guessed "wants a person" from a question that never asks for one (e.g. "can I choose my doctor")
         # medical advice / human requests are decided by rules OR the model - either one is enough
         if rule_i == "medical_question" or (a and a.intent == "medical_question"):
             # Doctor-style conversation: needs the AI safety net to have looked at this turn (a is not None).

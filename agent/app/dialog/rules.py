@@ -61,6 +61,16 @@ _HUMAN = re.compile(
     r"(human|person|someone|somebody|staff|agent|representative|operator|receptionist|reception|front desk|help ?desk|nurse|doctor|real person)"
     r"|\b(human|real person|operator|receptionist|insaan)\b|kisi se baat|staff se baat|baat karni|کسی سے بات|انسان|عملے"
 )
+_HUMAN_WORDS = re.compile(
+    r"(human|person|people|someone|somebody|staff|representative|operator|receptionist|reception|front desk|help ?desk|nurse|agent|insaan|admin)|baat|کسی|انسان|عملے|इंसान|स्टाफ़?|किसी से"
+)
+
+
+def explicit_human_request(norm: str) -> bool:
+    """True when the words themselves ask for a person. The AI alone may NOT turn a question like "can I choose my doctor" into a hand-over."""
+    return bool(_HUMAN_WORDS.search(norm))
+
+
 _GOODBYE = re.compile(
     r"^(bye|goodbye|good bye|that'?s all|that is all|no thanks?|no thank you|nothing else|nothing more|"
     r"thank you bye|thanks bye|khuda hafiz|allah hafiz|alvida|thats all|that'?s it|i'?m done|im done)$|^(allah|khuda) hafiz"

@@ -159,3 +159,17 @@ async def test_triage_safety_gates_pass():
     res = await triage_eval.evaluate()
     assert res["passed"], res["failures"][:10]
     assert res["emergency_recall"] == 1.0 and res["under_triage"] == 0
+
+
+# ---------------------------------------------------------------- the AI alone must not turn a question into a hand-over
+async def test_ai_guessing_talk_to_human_on_an_info_question_does_not_hand_over():
+    eng = Engine(Settings(), FakeLLM(A(intent="talk_to_human")), FakeEMR(), FakeRAG([]), None, None)
+    s = Session(id="t")
+    r = await eng.handle(s, "can I choose my doctor")
+    assert r.handover is None
+
+
+async def test_an_explicit_request_for_a_person_still_hands_over():
+    eng = Engine(Settings(), FakeLLM(A(intent="talk_to_human")), FakeEMR(), FakeRAG([]), None, None)
+    r = await eng.handle(Session(id="t"), "can I talk to a real person")
+    assert r.handover and r.handover.reason == "caller_requested"
