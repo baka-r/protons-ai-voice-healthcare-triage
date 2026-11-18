@@ -60,7 +60,7 @@ async def one(prompt, ip):
         spoke = False
         while time.time() < deadline:
             try:
-                m = await asyncio.wait_for(ws.recv(), 8)
+                m = await asyncio.wait_for(ws.recv(), 7 if events else 25)  # after an audio_end, wait for a follow-up answer
             except asyncio.TimeoutError:
                 break
             now = time.perf_counter()
@@ -74,8 +74,6 @@ async def one(prompt, ip):
                 spoke = True
             if j["type"] == "caption" and j["role"] == "assistant":
                 caps.append(j["text"])
-            if j["type"] == "audio_end" and events:  # (a late audio_end of the greeting arrives before any bytes)
-                break
         return first, events, caps
     finally:
         await ws.close()
